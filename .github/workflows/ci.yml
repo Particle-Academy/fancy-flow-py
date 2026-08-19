@@ -1,0 +1,65 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    name: Python ${{ matrix.python }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The shared conformance fixtures. Checked out, NOT skipped when absent:
+      # a conformance suite that silently does not run reads exactly like full
+      # coverage in a green log, which is the mechanism that hid two-way drift
+      # in this org before.
+      - name: Check out fancy-conformance
+        uses: actions/checkout@v4
+        with:
+          repository: Particle-Academy/fancy-conformance
+          path: .conformance
+          persist-credentials: false
+
+      # The PHP twin, for the golden graph fixtures. Those goldens live in its
+      # test directory rather than in the conformance package, so the only
+      # thing stopping our copy drifting is comparing the two here.
+      - name: Check out fancy-flow-php
+        uses: actions/checkout@v4
+        with:
+          repository: Particle-Academy/fancy-flow-php
+          path: .fancy-flow-php
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . --group dev
+
+      - name: Lint
+        run: ruff check . && ruff format --check .
+
+      - name: Type check
+        run: mypy
+
+      - name: Test
+        env:
+          FANCY_CONFORMANCE_ROOT: ${{ github.workspace }}/.conformance
+          FANCY_FLOW_PHP_FIXTURES: ${{ github.workspace }}/.fancy-flow-php/tests/Parity/fixtures
+        run: pytest -ra

@@ -1,0 +1,116 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fancy-flow"
+version = "0.1.0"
+description = "Python runtime for fancy-flow workflow graphs - the third twin of @particle-academy/fancy-flow's engine. Same WorkflowSchema JSON in, same outputs out."
+readme = "README.md"
+# 3.11, not the modal 3.10: 3.10 reaches end of life on 2026-10-31, and a floor
+# that dies before the package's second release is not a floor. 3.11 also buys
+# tomllib, ExceptionGroup, asyncio.TaskGroup, Self and StrEnum without
+# version-conditional code.
+requires-python = ">=3.11"
+# PEP 639: an SPDX expression, and NO license classifier. Build backends may
+# error when both are present.
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Particle Academy" }]
+keywords = [
+    "workflow",
+    "flow",
+    "automation",
+    "agentic",
+    "ai",
+    "dag",
+    "orchestration",
+    "durable-execution",
+    "fancy-flow",
+    "particle-academy",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+
+# ZERO runtime dependencies, and that is a design constraint rather than an
+# accident. Everything the built-in nodes reach for -- HTTP, an LLM, a vector
+# store, a queue -- is an injected protocol with an offline default, so a
+# workflow app that never calls a model does not inherit a provider SDK. Any
+# addition here has to be justified in .ai/plans/fancy-flow-py.md.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Particle-Academy/fancy-flow-py"
+Issues = "https://github.com/Particle-Academy/fancy-flow-py/issues"
+Source = "https://github.com/Particle-Academy/fancy-flow-py"
+
+# Runtime-optional FEATURES. Anything only the maintainers need is a dependency
+# group below, never an extra: PEP 735 groups are excluded from published
+# metadata, extras are permanent.
+#
+# All empty at 0.1.0 by design -- the adapters are staged, and an extra that
+# installs nothing is worse than an absent one. They are declared in the plan.
+[project.optional-dependencies]
+
+[dependency-groups]
+test = ["pytest>=8.0"]
+lint = ["ruff>=0.16"]
+typecheck = ["mypy>=1.11"]
+dev = [{ include-group = "test" }, { include-group = "lint" }, { include-group = "typecheck" }]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fancy_flow"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md", "/CHANGELOG.md", "/AGENTS.md", "/LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# importlib mode pairs with src-layout: the working tree is never on sys.path,
+# so the tests exercise the INSTALLED package. Under the default mode a missing
+# py.typed or an unshipped file passes locally and breaks for every user.
+addopts = "--import-mode=importlib -ra"
+filterwarnings = [
+    "error",
+    # The provenance check reports an unverified run rather than skipping
+    # silently; that report is a warning on purpose.
+    "default::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "N", "C4", "PT"]
+ignore = [
+    # The engine's walk is one function on purpose: splitting it is how a
+    # second copy of the routing rules gets written.
+    "C901",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into private state deliberately -- asserting on what `bind()`
+# STORED is the point of one of them.
+"tests/*" = ["SLF001", "PT011"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["fancy_flow"]
+mypy_path = "src"
+strict = true
+# The graph is JSON: `Any` is the honest type for a node's config value and for
+# whatever an executor returns. Forbidding it would only push the same
+# uncertainty into casts.
+disallow_any_expr = false
+disallow_any_explicit = false
