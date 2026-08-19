@@ -1,0 +1,15 @@
+# Line endings are part of the contract here, so they are pinned rather than
+# left to a clone's `core.autocrlf`.
+#
+# `tests/parity/fixtures/` is a byte-for-byte copy of fancy-flow-php's golden
+# fixtures, and `test_parity_fixtures_match_the_source` compares the two
+# runtimes' copies as bytes. On Windows, a fresh clone with the default
+# autocrlf rewrote every LF to CRLF on checkout — so all 23 fixtures reported as
+# "changed between the runtimes" on a clone that had changed nothing.
+#
+# That failure is indistinguishable from a real divergence, which is the whole
+# problem: the test exists to catch one side editing a golden, and a line-ending
+# conversion makes it cry wolf on every Windows checkout.
+* text=auto eol=lf
+*.json text eol=lf
+*.py text eol=lf
