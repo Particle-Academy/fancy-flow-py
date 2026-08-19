@@ -7,6 +7,7 @@ from typing import Any
 
 from .abort import AbortSignal
 from .events import RunEvent
+from .identity import RunIdentity
 
 __all__ = ["RunOptions", "RunResult"]
 
@@ -28,6 +29,12 @@ class RunOptions:
     :param depth: how deep this run is nested. ``subflow`` passes ``depth + 1``
         to the child graph it runs, so runaway recursion is reported BY NAME
         rather than as a RecursionError from somewhere unrelated.
+    :param run: who is running, so a writing node can derive a stable
+        idempotency key. **Deliberately not defaulted:** a key minted per call
+        would change on every whole-run retry, which is exactly the failure an
+        idempotency key exists to prevent -- so a host that has not supplied one
+        gets ``ctx.run is None`` and a connector that declines to write blind,
+        rather than a plausible-looking key that double-charges.
     """
 
     timeout_ms: int | None = None
@@ -35,6 +42,7 @@ class RunOptions:
     initial_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     resume_outputs: dict[str, Any] = field(default_factory=dict)
     depth: int = 0
+    run: RunIdentity | None = None
 
 
 @dataclass(frozen=True, slots=True)

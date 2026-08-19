@@ -30,8 +30,9 @@ from typing import Any
 from uuid import uuid4
 
 from ..executors import ExecutorRegistry
-from ..registry.registry import NodeKindRegistry
+from ..registry.registry import NodeKindRegistry, default_registry
 from ..runtime.events import RunEvent
+from ..runtime.identity import RunIdentity
 from ..runtime.options import RunResult
 from ..runtime.pause import Pause, PauseSignal
 from ..schema.graph import FlowGraph
@@ -53,6 +54,16 @@ class NodeOutcome:
     ports: tuple[str, ...] = ()
     error: str | None = None
     pause: PauseSignal | None = None
+    #: 1-based attempt this execution ran as. 0 when the claim was lost.
+    attempt: int = 0
+    #: True when this attempt failed and the policy still allows another.
+    #:
+    #: The claim row is left CLAIMED in that case, deliberately: a queue adapter
+    #: re-dispatches the job with the SAME owner token and the retry re-enters
+    #: the claim it already holds. Recording FAILED here instead would settle
+    #: the node, which SKIPS everything downstream -- a run reporting a tidy
+    #: finish having done half its work.
+    retryable: bool = False
 
     @property
     def claimed(self) -> bool:
@@ -78,12 +89,29 @@ class Coordinator:
 
     graph: FlowGraph
     executors: ExecutorRegistry
-    run_key: str
+    #: The run's stable identity. A bare string is taken as the run key.
+    #:
+    #: Required, not defaulted: a durable run without a stable key cannot key an
+    #: idempotent write, and minting one per construction would hand a retrying
+    #: host a different key each time.
+    run: RunIdentity | str
     store: NodeClaimStore = field(default_factory=InMemoryClaimStore)
     initial_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     kinds: NodeKindRegistry | None = None
     on_event: Callable[[RunEvent], None] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run", RunIdentity.from_value(self.run))
+
+    @property
+    def run_key(self) -> str:
+        return self.identity.run_key
+
+    @property
+    def identity(self) -> RunIdentity:
+        """The run identity, whatever spelling it was constructed with."""
+        return self.run if isinstance(self.run, RunIdentity) else RunIdentity.from_value(self.run)
 
     # -- the two operations ----------------------------------------------
 
@@ -108,6 +136,18 @@ class Coordinator:
         if not self.store.claim(self.run_key, node_id, owner):
             return NodeOutcome(node_id, "not-claimed")
 
+        row = self.store.state(self.run_key).get(node_id)
+        # Per NODE, off the claim row -- not per run. This is the only place the
+        # attempt and the first-attempt clock are EXACT rather than
+        # conservative, and they are what a writing connector checks a provider's
+        # idempotency window against.
+        identity = (
+            self.identity.with_attempt(row.attempts, row.first_attempt_at)
+            if row is not None
+            else self.identity
+        )
+        attempt = identity.attempt
+
         replay = replay_up_to(
             self.graph,
             node_id,
@@ -115,6 +155,7 @@ class Coordinator:
             resume_outputs=self._completed_outputs(),
             initial_inputs=self.initial_inputs,
             on_event=self._forward(node_id),
+            run=identity,
         )
         result = replay.result
 
@@ -122,14 +163,14 @@ class Coordinator:
             output = result.outputs[node_id]
             ports = replay.ports_of(node_id)
             self.store.complete(self.run_key, node_id, output, ports)
-            return NodeOutcome(node_id, NodeRunStatus.COMPLETED, output, ports)
+            return NodeOutcome(node_id, NodeRunStatus.COMPLETED, output, ports, attempt=attempt)
 
         # The node did not produce an output. Three reasons, and they are NOT
         # interchangeable.
         pause = Pause.decode(result.error)
         if pause is not None and pause.node_id == node_id:
             self.store.pause(self.run_key, node_id, result.error or "")
-            return NodeOutcome(node_id, NodeRunStatus.PAUSED, pause=pause)
+            return NodeOutcome(node_id, NodeRunStatus.PAUSED, pause=pause, attempt=attempt)
 
         if is_boundary(result.error):
             # The engine stopped at a node this job does not own BEFORE reaching
@@ -142,11 +183,35 @@ class Coordinator:
                 node_id,
                 NodeRunStatus.SKIPPED,
                 error="replay stopped before reaching this node",
+                attempt=attempt,
             )
 
         error = result.error or f"node {node_id} produced no output and no error"
+
+        if attempt < self._tries_for(node_id):
+            # Leave the row CLAIMED so the same owner can re-enter it. This is
+            # what `fancy-flow-php` does by only marking FAILED from the job's
+            # `failed()` hook -- a row a worker still holds must not settle
+            # mid-retry, because settling it skips everything downstream.
+            return NodeOutcome(
+                node_id, NodeRunStatus.FAILED, error=error, attempt=attempt, retryable=True
+            )
+
         self.store.fail(self.run_key, node_id, error)
-        return NodeOutcome(node_id, NodeRunStatus.FAILED, error=error)
+        return NodeOutcome(node_id, NodeRunStatus.FAILED, error=error, attempt=attempt)
+
+    def _tries_for(self, node_id: str) -> int:
+        """How many attempts this node gets, from the policy the host configured.
+
+        Until now :attr:`retry` was a declared field with no read site anywhere
+        in the package -- a policy object that looked wired and was not, so a
+        host setting ``tries=3`` got one attempt and no error. ``unsafe-to-replay``
+        was still honoured only because nothing retried at all.
+        """
+        node = next((n for n in self.graph.nodes if n.id == node_id), None)
+        if node is None:
+            return 1
+        return self.retry.tries_for(node, self.kinds or default_registry())
 
     # -- an in-process driver over the two ------------------------------
 
@@ -155,6 +220,14 @@ class Coordinator:
 
         Every checkpoint is written exactly as a queued run writes it, so a
         crash mid-loop resumes from the same place a crashed worker would.
+
+        Retries honour :class:`~fancy_flow.durable.retry.RetryPolicy`: a node
+        declaring ``unsafe-to-replay`` gets one attempt whatever the policy
+        says, and a retry re-enters the SAME claim with the SAME owner token --
+        so the step key it derives is unchanged, which is what makes the retry
+        idempotent rather than duplicative.
+
+        Nothing here sleeps, polls or waits on a person: a paused node RETURNS.
         """
         pause: PauseSignal | None = None
 
@@ -164,7 +237,7 @@ class Coordinator:
                 break
 
             for node_id in ready:
-                outcome = self.run_node(node_id)
+                outcome = self._run_node_with_retries(node_id)
                 if outcome.status == NodeRunStatus.PAUSED:
                     # A pause parks the RUN, not just the node: continuing would
                     # run the human gate's siblings while a person is still
@@ -196,6 +269,19 @@ class Coordinator:
 
         failed = [e.error for e in state.values() if e.status == NodeRunStatus.FAILED]
         return DurableRunResult(not failed, self.outputs(), failed[0] if failed else None)
+
+    def _run_node_with_retries(self, node_id: str) -> NodeOutcome:
+        """One owner token for every attempt of this node.
+
+        The token is what re-enters the claim rather than losing the race to
+        itself -- and it is why the step key a retrying node derives is the same
+        one its first attempt sent.
+        """
+        owner = uuid4().hex
+        outcome = self.run_node(node_id, owner)
+        while outcome.retryable:
+            outcome = self.run_node(node_id, owner)
+        return outcome
 
     def outputs(self) -> dict[str, Any]:
         """Checkpointed outputs, in the graph's own node order.

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
 __all__ = ["InMemoryClaimStore", "NodeClaimStore", "NodeRunStatus", "NodeState"]
@@ -35,6 +36,10 @@ class NodeRunStatus:
     SETTLED: Final = (COMPLETED, SKIPPED, FAILED)
 
 
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 @dataclass(slots=True)
 class NodeState:
     """One node's row.
@@ -42,6 +47,12 @@ class NodeState:
     ``ports`` are the ports the engine's own ``node-output`` events reported.
     They are STORED, never recomputed: a second copy of the routing table would
     agree for a year and then disagree on one branch.
+
+    ``first_attempt_at`` is the retry CLOCK, and it must never move. It is what
+    an idempotency window is measured from, so a store that refreshed it on each
+    reclaim would report a retry 25 hours late as seconds old -- and a connector
+    would reuse a key the provider forgot yesterday, creating the second charge
+    the mechanism exists to prevent.
     """
 
     status: str
@@ -50,6 +61,7 @@ class NodeState:
     error: str | None = None
     owner: str | None = None
     attempts: int = 0
+    first_attempt_at: str = field(default_factory=_now_iso)
 
 
 @runtime_checkable
@@ -101,7 +113,9 @@ class InMemoryClaimStore:
             existing = run.get(node_id)
 
             if existing is None:
-                run[node_id] = NodeState(NodeRunStatus.CLAIMED, owner=owner, attempts=1)
+                run[node_id] = NodeState(
+                    NodeRunStatus.CLAIMED, owner=owner, attempts=1, first_attempt_at=_now_iso()
+                )
                 return True
 
             # Re-entering our own claim is how a retry gets back in. Anything
@@ -174,4 +188,5 @@ def _copy(entry: NodeState) -> NodeState:
         error=entry.error,
         owner=entry.owner,
         attempts=entry.attempts,
+        first_attempt_at=entry.first_attempt_at,
     )

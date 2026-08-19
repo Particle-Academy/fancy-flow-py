@@ -45,7 +45,7 @@ def test_durable_driver_agrees_with_the_single_process_run(path: Path) -> None:
     durable = Coordinator(
         graph=graph,
         executors=builtin.executors(),
-        run_key=path.stem,
+        run=path.stem,
         initial_inputs=initial,
     ).run_to_completion()
 
@@ -81,7 +81,7 @@ def test_a_dead_branch_settles_instead_of_stalling() -> None:
     coordinator = Coordinator(
         graph=graph,
         executors=builtin.executors(),
-        run_key="dead-branch",
+        run="dead-branch",
         initial_inputs=doc["initialInputs"],
     )
     result = coordinator.run_to_completion()
@@ -108,7 +108,7 @@ def test_a_lost_claim_race_is_a_no_op() -> None:
     coordinator = Coordinator(
         graph=graph,
         executors=builtin.executors(),
-        run_key="race",
+        run="race",
         initial_inputs=doc["initialInputs"],
     )
 
@@ -150,7 +150,7 @@ def test_a_completed_node_is_republished_not_re_executed() -> None:
     )
     executors = ExecutorRegistry().bind("counted", counted).bind("downstream", downstream)
 
-    coordinator = Coordinator(graph=graph, executors=executors, run_key="resume")
+    coordinator = Coordinator(graph=graph, executors=executors, run="resume")
     coordinator.run_node("a")
     coordinator.run_node("b")
 

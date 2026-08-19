@@ -36,7 +36,17 @@ Pure core, `src/` layout, **zero runtime dependencies**.
   and a default executor for each one that executes -- `note` never does).
 - `executors.py` — `ExecutorRegistry`; resolves node id → kind → `*`.
 - `runtime/` — `RunEvent`, `RunOptions`, `RunResult`, `ExecutionContext`,
-  `Port`, `Pause`, `AbortSignal`.
+  `Port`, `Pause`, `AbortSignal`, `RunIdentity`.
+  **`RunIdentity` is what a WRITING node keys an idempotent call on.**
+  `ctx.run.step_key(ctx.node.id)` is the same on every retry of one step and
+  different for every other execution of the same node — which is why `attempt`
+  is carried on it and is NOT part of the key. `(run, node)` alone is
+  insufficient: a node runs once per subflow invocation and once per loop
+  iteration, so the key composes the invocation `path` and an optional
+  `occurrence`. `is_replay_safe()` says whether a retry is still inside the
+  provider's dedup window; past it the caller must REFUSE, because resending the
+  key and minting a fresh one both write twice. Pinned by
+  `shared/flow-run-identity`; the other two runtimes implement the same table.
 - `nodes/` — the default executors by domain, plus `nodes/support/` (injectable
   client protocols, offline fakes, the `{{ }}` resolver, structured output).
 - `capabilities/` — the HOST seam: `LlmClient` (`choose_route`, used by
@@ -87,7 +97,17 @@ alternative fails silently:
 3. **The claim is a unique constraint, not a check.** A lost race is a NO-OP.
    `NodeClaimStore.claim()` must be atomic, and must let an owner re-enter its
    OWN claim — that is what lets a retry resume instead of deadlocking against
-   the row it wrote itself.
+   the row it wrote itself, and it is also what makes the retry's idempotency
+   key identical to the first attempt's, since both read the same row.
+4. **`NodeState.first_attempt_at` is the retry clock and must never move.** It
+   is stamped on the first claim only. A store that refreshed it per attempt
+   would report a retry 25 hours late as seconds old, and a connector would
+   reuse a key the provider forgot yesterday.
+
+A failed node whose attempts are not exhausted is left **CLAIMED**, never
+recorded FAILED: a FAILED node settles, and settling one mid-retry skips
+everything downstream while the run reports a tidy finish. `NodeOutcome.retryable`
+is how a queue adapter learns to re-dispatch — with the SAME owner token.
 
 `Coordinator.run_to_completion()` drives both operations in-process. It is a real
 durable runner over a persistent store, not a stand-in for one.

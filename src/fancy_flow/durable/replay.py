@@ -47,6 +47,7 @@ from ..engine.runner import FlowRunner
 from ..executors import ExecutorRegistry
 from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
+from ..runtime.identity import RunIdentity
 from ..runtime.options import RunOptions, RunResult
 from ..schema.graph import FlowGraph
 
@@ -82,6 +83,7 @@ def replay_up_to(
     initial_inputs: dict[str, dict[str, Any]] | None = None,
     on_event: Callable[[RunEvent], None] | None = None,
     depth: int = 0,
+    run: RunIdentity | None = None,
 ) -> ReplayResult:
     """Replay ``graph`` up to and through ``node_id``.
 
@@ -112,6 +114,7 @@ def replay_up_to(
             initial_inputs=initial_inputs or {},
             resume_outputs=resume_outputs,
             depth=depth,
+            run=run,
         ),
     )
 

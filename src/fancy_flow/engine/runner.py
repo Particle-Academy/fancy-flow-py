@@ -218,7 +218,7 @@ class FlowRunner:
                 emit(RunEvent.log("error", msg, node.id))
                 break
 
-            ctx = ExecutionContext(node, inputs, emit, options.depth)
+            ctx = ExecutionContext(node, inputs, emit, options.depth, options.run)
             ok, payload = yield _Step(ctx, executor)
 
             if not ok:

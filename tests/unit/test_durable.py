@@ -239,7 +239,7 @@ def test_a_pre_filled_input_does_not_satisfy_a_user_input_gate() -> None:
         .bind("user_input", DurableUserInput(submissions))
     )
 
-    coordinator = Coordinator(graph=graph, executors=executors, run_key="gate")
+    coordinator = Coordinator(graph=graph, executors=executors, run="gate")
     result = coordinator.run_to_completion()
 
     assert result.paused
@@ -257,13 +257,13 @@ def test_a_recorded_answer_resumes_the_gate() -> None:
     )
     store = InMemoryClaimStore()
 
-    first = Coordinator(graph=graph, executors=executors, run_key="gate", store=store)
+    first = Coordinator(graph=graph, executors=executors, run="gate", store=store)
     assert first.run_to_completion().paused
 
     submissions.record("g", {"answer": "yes"})
     store.release("gate", "g")
 
-    second = Coordinator(graph=graph, executors=executors, run_key="gate", store=store)
+    second = Coordinator(graph=graph, executors=executors, run="gate", store=store)
     resumed = second.run_to_completion()
 
     assert resumed.ok
@@ -287,7 +287,7 @@ def test_auto_answer_from_input_is_opt_in_and_works_when_opted_into() -> None:
         .bind("user_input", DurableUserInput(submissions))
     )
 
-    result = Coordinator(graph=graph, executors=executors, run_key="auto").run_to_completion()
+    result = Coordinator(graph=graph, executors=executors, run="auto").run_to_completion()
 
     assert result.ok
     assert result.outputs["g"] == {"answer": "from upstream"}
@@ -314,7 +314,7 @@ def test_an_approval_gate_pauses_even_with_an_approved_flag_on_its_input() -> No
         .bind("human_approval", DurableApproval(submissions))
     )
 
-    result = Coordinator(graph=graph, executors=executors, run_key="approve").run_to_completion()
+    result = Coordinator(graph=graph, executors=executors, run="approve").run_to_completion()
     assert result.paused
     assert result.pause is not None
     assert result.pause.is_approval

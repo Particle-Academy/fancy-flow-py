@@ -82,7 +82,7 @@ and nothing else.
 ```python
 from fancy_flow.durable import Coordinator
 
-flow = Coordinator(graph=graph, executors=executors, run_key=run_id, store=store)
+flow = Coordinator(graph=graph, executors=executors, run=run_id, store=store)
 
 ready = flow.advance()  # what is unblocked right now -> dispatch these
 flow.run_node(node_id)  # claim, run through the real engine, checkpoint

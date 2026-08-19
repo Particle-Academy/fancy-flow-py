@@ -8,6 +8,62 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+### Added
+
+- **`RunIdentity` on the execution context, so a node that WRITES can send an
+  idempotency key.** `ctx.run` is new, and `ctx.run.step_key(ctx.node.id)` is
+  the key.
+
+  Nothing in `{node, inputs, emit, depth}` could produce a key that is the same
+  on a retry and different on a different execution, so a writing connector had
+  to declare `unsafe-to-replay` and send none — meaning a timed-out payment
+  could never be retried, because retrying it would charge the card twice.
+
+  What identifies a step is deliberately **not** `(run, node)`: a node
+  legitimately runs many times in one run, once per subflow invocation and once
+  per loop iteration. The key is the run key plus the *path of invocations* that
+  led here plus an optional occurrence — `run_9f2c:billing/pay#3` — and
+  `attempt` is carried on the identity but **deliberately absent from the key**.
+
+  `is_replay_safe(window_seconds, now)` answers the other half: providers forget
+  keys (Stripe after 24h), and past that window resending the key and minting a
+  fresh one BOTH write twice, so the caller must refuse. Attempt 1 is always
+  safe, which is what lets a run park on a human gate for a week and then write.
+
+  Pinned across Python, TypeScript and PHP by `shared/flow-run-identity` in
+  `fancy-conformance` (25 rows).
+
+### Fixed
+
+- **`Coordinator.retry` was wired to nothing.** `RetryPolicy` was a declared
+  field with **no read site anywhere in the package** — so a host constructing
+  `Coordinator(retry=RetryPolicy(tries=3))` got exactly one attempt per node and
+  no error to say otherwise. `unsafe-to-replay` appeared to be honoured only
+  because nothing retried at all.
+
+  `run_to_completion()` now consults the policy: a failed node whose attempts
+  are not exhausted is retried under the **same owner token**, so it re-enters
+  its own claim and derives the **same** step key — which is what makes the
+  retry idempotent rather than duplicative. A node declaring `unsafe-to-replay`
+  is still pinned to one attempt whatever `tries` says.
+
+  `NodeOutcome` gains `attempt` and `retryable`. A failed-but-retryable node is
+  deliberately left CLAIMED rather than recorded FAILED: a FAILED node settles,
+  and settling one mid-retry skips everything downstream while the run reports a
+  tidy finish.
+
+### Changed
+
+- **BREAKING (unreleased): `Coordinator.run_key` is now `Coordinator.run`**, and
+  takes a `RunIdentity` or a bare run-key string. *What to do:* rename the
+  keyword — `Coordinator(..., run="run_9f2c")`. `coordinator.run_key` still
+  reads the key.
+- `NodeState` gains `first_attempt_at`, the retry clock. It is stamped on the
+  first claim and **must never move**: a store that refreshed it per attempt
+  would report a retry 25 hours late as seconds old, and a connector would reuse
+  a key the provider forgot yesterday. Adapters constructing `NodeState` get a
+  sane default and need no change.
+
 ## [0.1.0] - unreleased
 
 The first cut: the pure engine, the node contracts, the registries, and a

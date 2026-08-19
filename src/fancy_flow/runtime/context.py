@@ -8,6 +8,7 @@ from typing import Any, NoReturn
 from ..exceptions import RunAborted
 from ..schema.graph import FlowNode
 from .events import RunEvent
+from .identity import RunIdentity
 from .pause import Pause, PauseSignal
 
 __all__ = ["ExecutionContext"]
@@ -21,9 +22,16 @@ class ExecutionContext:
       default port is ``in``), merged over any seeded initial inputs.
     - ``abort()`` stops the whole run.
     - ``emit()``  streams a :class:`RunEvent` to the run's event sink.
+    - ``run``    who is running, and which attempt of which step this is.
+      ``ctx.run.step_key(ctx.node.id)`` is the idempotency key for a node that
+      writes to somebody else's system -- stable across retries of this step,
+      distinct for every other execution of the same node. ``None`` when the
+      host supplied no identity, and that is a real answer: a write with no key
+      must decline or accept one attempt, never invent a key. See
+      :class:`~fancy_flow.runtime.identity.RunIdentity`.
     """
 
-    __slots__ = ("_emit", "depth", "inputs", "node")
+    __slots__ = ("_emit", "depth", "inputs", "node", "run")
 
     def __init__(
         self,
@@ -31,11 +39,13 @@ class ExecutionContext:
         inputs: dict[str, Any],
         emit: Callable[[RunEvent], None],
         depth: int = 0,
+        run: RunIdentity | None = None,
     ) -> None:
         self.node = node
         self.inputs = inputs
         self._emit = emit
         self.depth = depth
+        self.run = run
 
     def abort(self, reason: str | None = None) -> NoReturn:
         """Stop the run. Raises :class:`RunAborted`; the runner records the reason."""

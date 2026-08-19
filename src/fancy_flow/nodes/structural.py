@@ -59,6 +59,7 @@ class Subgraph:
             options=RunOptions(
                 initial_inputs=seed_entry_nodes(result.graph, ctx.inputs),
                 depth=ctx.depth + 1,
+                run=ctx.run.descend(ctx.node.id) if ctx.run else None,
             ),
         )
 
@@ -180,6 +181,13 @@ class Subflow:
             RunOptions(
                 initial_inputs=_child_inputs(config, child, ctx.inputs),
                 depth=ctx.depth + 1,
+                # Push THIS node onto the identity path, so a node inside the
+                # child graph cannot share an idempotency key with a same-named
+                # node in the parent -- or with the same child graph invoked
+                # from a different parent node. Attempt and the first-attempt
+                # clock ride down unchanged: the child's work happens inside
+                # this node's attempt.
+                run=ctx.run.descend(ctx.node.id) if ctx.run else None,
             ),
         )
 
