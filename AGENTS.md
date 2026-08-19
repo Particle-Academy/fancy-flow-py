@@ -32,7 +32,8 @@ Pure core, `src/` layout, **zero runtime dependencies**.
   active** (merge-after-decision, `#1`) and `_collect_inputs` reads only active
   edges. Don't regress either.
 - `registry/` — `NodeKindRegistry`, `NodeKind`, `ConfigField`, `kind_id`, and
-  `builtin` (26 kinds + their default executors).
+  `builtin` (the 24 authorable kinds, plus structural `note` and `subgraph`,
+  and a default executor for each one that executes -- `note` never does).
 - `executors.py` — `ExecutorRegistry`; resolves node id → kind → `*`.
 - `runtime/` — `RunEvent`, `RunOptions`, `RunResult`, `ExecutionContext`,
   `Port`, `Pause`, `AbortSignal`.
@@ -165,8 +166,9 @@ discovery when the checkouts are somewhere unusual.
 
 ## Status
 
-**0.1.0 — core parity, unreleased.** The engine, the registries, all 26 built-in
-kinds and their executors, `{{ }}`, capabilities, the node manifest,
+**0.1.0 — core parity, unreleased.** The engine, the registries, the 24 built-in
+kinds plus structural `note` / `subgraph` and their executors, `{{ }}`,
+capabilities, the node manifest,
 `GraphPolicy`, and the durable core (claims / frontier / replay / retries /
 human gates / coordinator) are built and tested.
 

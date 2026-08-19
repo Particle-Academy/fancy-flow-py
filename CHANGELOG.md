@@ -29,7 +29,7 @@ durable layer that needs no queue library.
 - **Registries** — `NodeKindRegistry` (kinds, aliases, config defaults and
   validation) and `ExecutorRegistry` (node id → kind → `*`, alias-aware in both
   directions, callables / objects / classes through a `Resolver`).
-- **26 built-in kinds** across trigger / logic / data / ai / io / human / output,
+- **24 built-in kinds** across trigger / logic / data / ai / io / human / output,
   plus structural `note` and `subgraph`, each with a framework-free default
   executor and an offline client.
 - **`{{ }}` expressions** — dot-paths only, no evaluation. Scanned rather than
