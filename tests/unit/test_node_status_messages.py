@@ -237,3 +237,50 @@ def test_a_node_with_no_messages_stays_clean_in_the_document() -> None:
 
     assert "startingMsg" not in node
     assert "stoppingMsg" not in node
+
+
+# ── inputs addressable by the source node id (fancy-flow-php#8) ────────────
+
+
+def test_inputs_are_addressable_by_the_source_node_id() -> None:
+    """Authors write ``{{ n2.text }}`` and it used to resolve to nothing.
+
+    Nothing failed either: an unresolvable path yields ``''``, so the node ran,
+    the run reported success, and the damage was output that was quietly wrong.
+    """
+    seen: dict = {}
+
+    def sink(ctx):
+        seen.update(ctx.inputs)
+        return 1
+
+    g = graph(
+        [FlowNode("n2", "src"), FlowNode("sink", "sink")],
+        [FlowEdge("e1", "n2", "sink")],
+    )
+    registry = builtin_executors().bind("src", lambda ctx: {"text": "hello"}).bind("sink", sink)
+    FlowRunner().run(g, registry)
+
+    assert seen["in"] == {"text": "hello"}, "the existing spelling still works"
+    assert seen["n2"] == {"text": "hello"}, "and so does the one authors write"
+
+
+def test_an_explicit_target_handle_is_not_shadowed_and_gets_no_alias() -> None:
+    # An edge that named a handle said what it meant; a second key under the
+    # source id would quietly widen a deliberate contract.
+    seen: dict = {}
+
+    def sink(ctx):
+        seen.update(ctx.inputs)
+        return 1
+
+    g = graph(
+        [FlowNode("n2", "src"), FlowNode("sink", "sink")],
+        [FlowEdge("e1", "n2", "sink", target_handle="context")],
+    )
+    registry = builtin_executors().bind("src", lambda ctx: {"text": "hello"}).bind("sink", sink)
+    FlowRunner().run(g, registry)
+
+    assert seen["context"] == {"text": "hello"}
+    assert "n2" not in seen
+    assert "in" not in seen

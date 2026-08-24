@@ -401,6 +401,20 @@ def _collect_inputs(
         key = _port_key(edge.source, edge.source_handle)
         if key in port_values:
             inputs[edge.target_handle or "in"] = port_values[key]
+
+            # ALSO addressable by the SOURCE NODE'S ID when the edge named no
+            # handle. Authors write ``{{ n2.text }}`` first -- it is how every
+            # graph tool addresses nodes, and it is what an assistant generating
+            # a graph reaches for. That resolved to nothing while NOTHING
+            # FAILED, because an unresolvable path yields ``''``: the node ran,
+            # the run reported success, and the damage was output that was
+            # quietly wrong (fancy-flow-php#8).
+            #
+            # Only for handle-less edges -- an edge that named one said what it
+            # meant -- and never clobbering a key already present, whether from
+            # the host's initial inputs or an earlier edge.
+            if edge.target_handle is None and edge.source not in inputs:
+                inputs[edge.source] = port_values[key]
     return inputs
 
 
