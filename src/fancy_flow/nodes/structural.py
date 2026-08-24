@@ -176,7 +176,11 @@ class Subflow:
 
         result = FlowRunner().run(
             child,
-            self._executors or builtin_executors(self._deps),
+            # Inherited first: the registry the PARENT is running with, so a
+            # host kind resolves at every depth. An explicitly injected
+            # registry still wins for a caller that constructed this executor
+            # deliberately; the bare builtins remain only as a last resort.
+            getattr(ctx, "executors", None) or self._executors or builtin_executors(self._deps),
             forward,
             RunOptions(
                 initial_inputs=_child_inputs(config, child, ctx.inputs),

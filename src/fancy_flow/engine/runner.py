@@ -218,7 +218,8 @@ class FlowRunner:
                 emit(RunEvent.log("error", msg, node.id))
                 break
 
-            ctx = ExecutionContext(node, inputs, emit, options.depth, options.run)
+            _announce(emit, node, "start")
+            ctx = ExecutionContext(node, inputs, emit, options.depth, options.run, executors)
             ok, payload = yield _Step(ctx, executor)
 
             if not ok:
@@ -228,6 +229,10 @@ class FlowRunner:
                 break
 
             self._publish(node, payload, outputs, port_values, emit)
+            # Success path only, and deliberately so: a stopping message after a
+            # failure tells a human the opposite of what happened, in the part
+            # of the UI they trust most.
+            _announce(emit, node, "end")
 
         ok = not errors
         emit(RunEvent.run_end(ok))
@@ -397,3 +402,25 @@ def _collect_inputs(
         if key in port_values:
             inputs[edge.target_handle or "in"] = port_values[key]
     return inputs
+
+
+def _announce(emit: Any, node: FlowNode, phase: str) -> None:
+    """Emit a node's own status message for one phase, if it declared one.
+
+    Opt-in by absence: a node with neither message says nothing, because most
+    nodes in a graph are plumbing and narrating all of them buries the two or
+    three steps a person actually follows.
+
+    A message must be non-empty after stripping. A blank field is the shape a
+    cleared editor input takes, and a blank line in a progress feed cannot be
+    told apart from a real message that renders as nothing.
+    """
+    raw = node.starting_msg if phase == "start" else node.stopping_msg
+    if not isinstance(raw, str):
+        return
+
+    message = raw.strip()
+    if not message:
+        return
+
+    emit(RunEvent.node_message(node.id, phase, message))

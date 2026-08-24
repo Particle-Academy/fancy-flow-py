@@ -98,6 +98,8 @@ def import_workflow(
             y=float(position.get("y", 0)),
             label=raw.get("label") or (kind.label if kind is not None else kind_name),
             description=str(raw["description"]) if raw.get("description") is not None else None,
+            starting_msg=str(raw["startingMsg"]) if raw.get("startingMsg") is not None else None,
+            stopping_msg=str(raw["stoppingMsg"]) if raw.get("stoppingMsg") is not None else None,
             config=config,
             # inputs/outputs intentionally left None on import - the engine then
             # falls back to the kind's ports, or a single `out`, matching the
@@ -191,6 +193,13 @@ def _node_to_schema(node: FlowNode) -> dict[str, Any]:
         out["label"] = node.label
     if node.description is not None:
         out["description"] = node.description
+    # Omitted entirely when unset, so a graph of ordinary plumbing nodes does
+    # not carry a pair of empty keys per node and every diff of a saved graph
+    # stays readable.
+    if node.starting_msg and node.starting_msg.strip():
+        out["startingMsg"] = node.starting_msg
+    if node.stopping_msg and node.stopping_msg.strip():
+        out["stoppingMsg"] = node.stopping_msg
     if node.config:
         out["config"] = node.config
     return out

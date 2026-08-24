@@ -31,7 +31,7 @@ class ExecutionContext:
       :class:`~fancy_flow.runtime.identity.RunIdentity`.
     """
 
-    __slots__ = ("_emit", "depth", "inputs", "node", "run")
+    __slots__ = ("_emit", "depth", "executors", "inputs", "node", "run")
 
     def __init__(
         self,
@@ -40,12 +40,20 @@ class ExecutionContext:
         emit: Callable[[RunEvent], None],
         depth: int = 0,
         run: RunIdentity | None = None,
+        executors: Any = None,
     ) -> None:
         self.node = node
         self.inputs = inputs
         self._emit = emit
         self.depth = depth
         self.run = run
+        # The registry THIS run is executing against, handed down so an
+        # executor that starts a NESTED run gives the child the same executors
+        # as the parent. ``subflow`` previously fell back to the bare builtins,
+        # so a host kind resolved at top level and vanished one level down, and
+        # a host that had REPLACED a builtin got the package's version in the
+        # child. Same graph, different behaviour by nesting depth.
+        self.executors = executors
 
     def abort(self, reason: str | None = None) -> NoReturn:
         """Stop the run. Raises :class:`RunAborted`; the runner records the reason."""

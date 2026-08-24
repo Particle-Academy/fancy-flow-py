@@ -8,6 +8,39 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-24
+
+### Fixed
+
+- **`subflow` now runs its child against the parent's registry.** It fell back
+  to `builtin_executors(...)` — the BARE builtins — so a host-registered kind
+  resolved at top level and vanished one level down, and a host that had
+  REPLACED a builtin got the package's version inside the child. The same graph
+  behaved two ways depending on nesting depth, and nothing warned, because an
+  unregistered kind fails closed with no outputs.
+
+  The registry now rides on `ExecutionContext.executors`, so any executor that
+  starts a nested run inherits it without opting in.
+
+  Reported against the PHP twin as `fancy-flow-php#7` and fixed in all three
+  runtimes together — found here by checking parity rather than assuming it.
+
+### Added
+
+- **Per-node status messages**, matching `@particle-academy/fancy-flow` 0.49.0
+  and `particle-academy/fancy-flow-php` 0.21.0. A `FlowNode` may carry
+  `starting_msg` / `stopping_msg`; the runner announces them around that node as
+  `RunEvent.node_message()` (`node-message`, `phase` of `start` or `end`).
+  Carried through `import_workflow` / `export_workflow`, and omitted from the
+  document entirely when unset.
+
+  Opt-in per node — most nodes in a graph are plumbing, and narrating all of
+  them buries the steps a person follows.
+
+  **`stopping_msg` fires only when the node SUCCEEDS.** A completion message
+  after a raise tells a human the opposite of what happened.
+
+
 ### Added
 
 - **`RunIdentity` on the execution context, so a node that WRITES can send an

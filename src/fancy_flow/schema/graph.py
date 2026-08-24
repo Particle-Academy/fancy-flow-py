@@ -71,6 +71,14 @@ class FlowNode:
     y: float = 0.0
     label: str | None = None
     description: str | None = None
+    #: Announced to a person just BEFORE this node runs -- "Starting the deep
+    #: analysis". Optional on purpose: most nodes in a graph are plumbing, and
+    #: narrating all of them buries the steps anyone actually follows.
+    starting_msg: str | None = None
+    #: Announced AFTER this node finishes -- "Analysis complete". Emitted only
+    #: when the node SUCCEEDS: a completion message printed after a failure
+    #: tells a human the opposite of what happened.
+    stopping_msg: str | None = None
     config: dict[str, Any] = field(default_factory=dict)
     inputs: tuple[PortDescriptor, ...] | None = None
     outputs: tuple[PortDescriptor, ...] | None = None

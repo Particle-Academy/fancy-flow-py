@@ -28,7 +28,7 @@ class NodeStatus:
 class RunEvent:
     """A single event in a run's stream.
 
-    Types: ``run-start``, ``node-status``, ``node-output``, ``log``,
+    Types: ``run-start``, ``node-status``, ``node-message``, ``node-output``, ``log``,
     ``run-end``, ``run-error``. Build them with the classmethods.
     """
 
@@ -37,6 +37,7 @@ class RunEvent:
     # real field after it illegal.
     RUN_START: ClassVar[str] = "run-start"
     NODE_STATUS: ClassVar[str] = "node-status"
+    NODE_MESSAGE: ClassVar[str] = "node-message"
     NODE_OUTPUT: ClassVar[str] = "node-output"
     LOG: ClassVar[str] = "log"
     RUN_END: ClassVar[str] = "run-end"
@@ -46,6 +47,7 @@ class RunEvent:
     node_id: str | None = None
     status: str | None = None
     text: str | None = None
+    phase: str | None = None
     port_id: str | None = None
     value: Any = None
     level: str | None = None
@@ -61,6 +63,17 @@ class RunEvent:
     @classmethod
     def node_status(cls, node_id: str, status: str, text: str | None = None) -> RunEvent:
         return cls(cls.NODE_STATUS, node_id=node_id, status=status, text=text)
+
+    @classmethod
+    def node_message(cls, node_id: str, phase: str, message: str) -> RunEvent:
+        """A node's own human-facing announcement.
+
+        Deliberately NOT folded into ``node_status``'s ``text``, which already
+        carries "skipped", "resumed", "lane" and raw error strings. Those are
+        diagnostics; this is addressed to a person, and a progress feed cannot
+        be asked to guess which is which.
+        """
+        return cls(cls.NODE_MESSAGE, node_id=node_id, phase=phase, message=message)
 
     @classmethod
     def node_output(cls, node_id: str, port_id: str, value: Any) -> RunEvent:
