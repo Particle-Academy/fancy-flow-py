@@ -6,6 +6,43 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.6.0] - 2026-08-25
+
+### Added
+
+- **`RunOptions.entry_nodes` — run only the trigger that actually fired.** Names
+  the live entry points; everything reachable only from the others is skipped.
+
+  A graph may hold more than one trigger — a `manual_trigger` for hand-testing
+  beside the event trigger that runs it for real — and a trigger has no inbound
+  edges, which **is** the readiness rule. So every trigger's branch ran on every
+  run, whichever one fired.
+
+  The triggers themselves were harmless; everything downstream of the ones that
+  did not fire was not. Measured in production against the PHP twin: an empty
+  payload winning a race into a shared `transform`, and — with no workaround — a
+  `user_input` on the manual branch executing during an **event**-triggered run,
+  parking it to ask a person for data the event had already supplied.
+
+  ```python
+  FlowRunner().run(graph, executors, options=RunOptions(entry_nodes=["evt"]))
+  ```
+
+  **What to do: nothing.** Leaving it `None` behaves exactly as before, and that
+  compatibility guarantee is row `0101` of the shared table.
+
+  Two edges worth knowing, both pinned: **`None` is not `[]`** — unset runs every
+  entry point, an empty list says none is live and runs nothing; and naming a
+  node that HAS inbound edges names no entry point, so nothing runs. Validate
+  your ids if you want a typo to be loud — the runtime cannot tell one from a
+  deliberate empty selection.
+
+  Pinned by `flow/entry-points` in `fancy-conformance` (7 rows), written as a
+  specification before any runtime implemented it. Verified red: removing the
+  gate fails exactly 5 of the 7, and the same 5 fail in the TypeScript and PHP
+  twins — the shared corpus doing its job rather than three runtimes each
+  re-deriving a paragraph.
+
 ## [0.5.0] - 2026-08-25
 
 ### Fixed

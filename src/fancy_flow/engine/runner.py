@@ -188,6 +188,7 @@ class FlowRunner:
         resume_outputs = options.resume_outputs
         signal = options.signal
         timeout_ms = options.timeout_ms
+        entry_nodes = options.entry_nodes
 
         outputs: dict[str, Any] = {}
         #: key: "{node_id}:{port_id}"
@@ -256,6 +257,21 @@ class FlowRunner:
                 continue
 
             incoming = incoming_by_node.get(node.id, ())
+
+            # An ENTRY POINT this run did not start from is inactive.
+            #
+            # A node with no inbound edges is unconditionally ready -- that IS
+            # the readiness rule -- so a graph with two triggers ran both
+            # branches on every run, whichever trigger actually fired. Marking
+            # the unnamed ones inactive here lets the "at least one active
+            # inbound edge" test below skip everything reachable only from them,
+            # with no new routing logic.
+            #
+            # Gates only nodes with NO incoming edges: a node further down the
+            # graph is not an entry point and its readiness is still its edges'.
+            if not incoming and entry_nodes is not None and node.id not in entry_nodes:
+                emit(RunEvent.node_status(node.id, NodeStatus.IDLE, "skipped"))
+                continue
 
             # Run once any upstream branch reaches this node. In topological
             # order every upstream node is already settled, so each incoming

@@ -31,6 +31,30 @@ class RunOptions:
         republished on its ports, reproducing the same routing. This is the
         primitive durable resume is built on, and the reason a per-node queue
         driver never has to re-implement routing.
+    :param entry_nodes: which ENTRY POINTS are live -- the ids of nodes with NO
+        incoming edges this run should start from. ``None`` means unset and
+        every entry point runs, exactly as before the option existed.
+
+        A graph may hold more than one trigger -- a ``manual_trigger`` for
+        hand-testing beside the event trigger that runs it for real -- and a
+        trigger has no inbound edges, which IS the readiness rule. So without
+        this, every trigger's branch runs on every run, whichever one fired.
+        The triggers themselves are harmless; everything DOWNSTREAM of the ones
+        that did not fire is not. A ``user_input`` stranded on the manual branch
+        parks an event-driven run to ask a person for data the event already
+        supplied, which from outside looks like the event trigger being ignored.
+
+        Naming the live entry points makes the others INACTIVE, and the existing
+        "at least one active inbound edge" rule then skips everything reachable
+        only from them. No new routing logic.
+
+        Three edges, each pinned by ``flow/entry-points`` in
+        ``fancy-conformance``: ``None`` is NOT ``[]`` (unset runs every entry
+        point; an empty list says none is live and runs nothing); a node
+        reachable from SEVERAL entry points still runs when any one fires; and
+        naming a node that HAS inbound edges names no entry point, so nothing
+        runs -- validate your ids if you want a typo to be loud, because the
+        runtime cannot tell one from a deliberate empty selection.
     :param depth: how deep this run is nested. ``subflow`` passes ``depth + 1``
         to the child graph it runs, so runaway recursion is reported BY NAME
         rather than as a RecursionError from somewhere unrelated.
@@ -47,6 +71,7 @@ class RunOptions:
     initial_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     props: dict[str, Any] = field(default_factory=dict)
     resume_outputs: dict[str, Any] = field(default_factory=dict)
+    entry_nodes: tuple[str, ...] | list[str] | None = None
     depth: int = 0
     run: RunIdentity | None = None
 
