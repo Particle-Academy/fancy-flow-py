@@ -167,7 +167,20 @@ class ExecutorRegistry:
         ordered = [*declared, *kid.variants(kind)]
         seen: dict[str, None] = {}
         for item in ordered:
-            if item != kind:
+            # ``*`` is excluded in BOTH directions, and only one was covered.
+            # ``bind`` already refuses to expand the sentinel OUT to namespaced
+            # spellings -- but nothing stopped an alias expanding IN to it, so a
+            # kind that answers to ``*`` turned one ordinary ``bind`` into a
+            # GLOBAL FALLBACK for every unmatched node in the graph. Silently:
+            # a fallback that exists and one that does not both let a run
+            # complete.
+            #
+            # The ``*`` slot may only ever be written by an explicit
+            # ``bind("*")``. Found by ``flow/executor-resolution/0107``, which
+            # caught the identical defect in the PHP twin -- both expand aliases
+            # at BIND time, and TypeScript was unaffected only because it
+            # expands at LOOKUP time and never looks the sentinel up as a kind.
+            if item != kind and item != "*":
                 seen.setdefault(item, None)
         return list(seen)
 

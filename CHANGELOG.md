@@ -6,6 +6,44 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.5.0] - 2026-08-25
+
+### Fixed
+
+- **Binding one ordinary kind could silently install a GLOBAL FALLBACK for every
+  unmatched node.** `bind` expands a kind into every id it answers to, and
+  already refused to expand the `*` sentinel *outwards* — but nothing stopped an
+  alias expanding *inwards* to it. A kind whose alias list contains `*` therefore
+  turned `bind("everything", …)` into `bind("*", …)`, and from then on every node
+  with no executor of its own ran that one.
+
+  Silent by construction: a fallback that exists and a fallback that does not
+  both let the run complete, and both produce a value. The `*` slot may now only
+  be written by an explicit `bind("*")`.
+
+  **This runtime and the PHP twin had the identical defect, for the identical
+  reason** — both expand aliases at BIND time. TypeScript was unaffected only
+  because it expands at LOOKUP time and never looks the sentinel up as a kind.
+  One fixture row found it in two runtimes on the day it was written, which is
+  the argument for the shared corpus made better than any prose about it.
+
+  **What to do: nothing**, unless you registered a kind literally named `*`.
+
+### Added
+
+- **`flow/executor-resolution` runs here** — the `node id → kind → *` order,
+  alias resolution in both directions, and failing closed when nothing matches.
+  Eight rows run; the six `0200` rows carry a stated structural skip, because
+  this runtime's `FlowNode` is FLATTENED: `type` IS the kind and there is no
+  `data` slot for a `data.kind` to disagree from.
+
+  The TypeScript runtime could run the WRONG executor when `type` and
+  `data.kind` named two different registered kinds — with the correct executor
+  registered and unused. This runtime cannot, structurally rather than by care.
+  Adding a `data.kind` field here so it could answer rows about one would be
+  writing code to satisfy a table, which is the inversion the conformance
+  package exists to prevent, so the asymmetry is recorded on the rows instead.
+
 ## [0.4.1] - 2026-08-25
 
 Everything here came from the runtime's FIRST OUTSIDE CONSUMER, who ran the
