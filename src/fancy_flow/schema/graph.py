@@ -8,7 +8,7 @@ also have: if a method decides anything, it belongs in the engine.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 __all__ = [
     "FlowEdge",
@@ -116,6 +116,12 @@ class FlowGraph:
 
     nodes: tuple[FlowNode, ...] = ()
     edges: tuple[FlowEdge, ...] = ()
+    #: What this workflow ACCEPTS at run start — ``{name, type?, required?,
+    #: default?}`` per entry. Callers pass a flat mapping BY NAME rather than
+    #: keyed by node id, so renaming a trigger no longer breaks every caller
+    #: silently. Empty for a workflow that takes none, which is every graph
+    #: saved before this existed.
+    inputs: tuple[Mapping[str, Any], ...] = ()
 
     def node(self, node_id: str) -> FlowNode | None:
         for node in self.nodes:

@@ -6,6 +6,50 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.4.0] - 2026-08-25
+
+### Added
+
+- **Workflow props — the Python twin.** `FlowGraph.inputs` declares what a
+  workflow accepts and `RunOptions.props` carries what a caller passed, by NAME
+  rather than keyed by node id.
+
+  Unknown key, missing required value and wrong type each **fail the run before
+  any node executes**. What this replaces was silence: `initial_inputs` is keyed
+  by node id, so a caller had to know the trigger was called `t`, and a
+  misspelled key was not an error — the value sat unread while the run reported
+  success.
+
+  Entry nodes are seeded by bare name (so an existing graph reading
+  `{{ topic }}` keeps working unchanged) and every node gets `$props` when the
+  workflow declares inputs. The expression resolver needed no change: `$props`
+  is an ordinary input key and it already walks dot-paths.
+
+  `bool` is tested before `int` in the type check, because
+  `isinstance(True, int)` is true in Python — a `number` declaration would
+  otherwise accept `True`, which is a check that runs, passes and asserts
+  nothing.
+
+  Pinned by `flow/workflow-props` in `fancy-conformance` (21 cases), run from
+  the same file by the TypeScript and PHP runtimes.
+
+### Fixed
+
+- **The conformance loader skipped rows meant for OTHER languages.**
+  `run_table` tested the whole `skip` map for truthiness, so a case skipped for
+  PHP alone was skipped on Python too — and the log still read green, because a
+  skip is not a failure. The empty-reason guard beside it was simultaneously
+  unreachable, since `str({"php": "..."})` is never blank.
+
+  This is precisely the defect `fancy-conformance`'s own notes predicted for
+  the private loader copies, and it cost a real row: `0106` is skipped for PHP
+  (its input is unrepresentable there) and must RUN here. The suite now reports
+  21 passed / 0 skipped where it previously reported 20 / 1.
+
+  The copy still exists only because the promoted `fancy-conformance` Python
+  loader is not published on PyPI yet; when it is, this file should be deleted
+  rather than maintained.
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-08-24

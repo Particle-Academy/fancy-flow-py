@@ -21,6 +21,11 @@ class RunOptions:
     :param signal: cooperative cancellation, checked before each node.
     :param initial_inputs: inputs seeded to entry nodes, keyed by node id then
         port.
+    :param props: values for the inputs the GRAPH declares, passed BY NAME.
+        ``initial_inputs`` is keyed by node id, so a caller had to know the
+        trigger was called ``t`` and a rename broke every caller while the
+        graph stayed valid. These are checked against the graph's own
+        declaration, so a misspelling fails the run instead of sitting unread.
     :param resume_outputs: outputs of nodes already completed in a prior run,
         keyed by node id. Such a node is NOT re-executed — its stored output is
         republished on its ports, reproducing the same routing. This is the
@@ -40,6 +45,7 @@ class RunOptions:
     timeout_ms: int | None = None
     signal: AbortSignal | None = None
     initial_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    props: dict[str, Any] = field(default_factory=dict)
     resume_outputs: dict[str, Any] = field(default_factory=dict)
     depth: int = 0
     run: RunIdentity | None = None

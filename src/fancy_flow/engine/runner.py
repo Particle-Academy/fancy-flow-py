@@ -36,7 +36,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import time
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -47,6 +47,7 @@ from ..registry.registry import NodeKindRegistry, default_registry
 from ..runtime.context import ExecutionContext
 from ..runtime.events import NodeStatus, RunEvent
 from ..runtime.options import RunOptions, RunResult
+from ..runtime.workflow_props import resolve_workflow_props
 from ..schema.graph import FlowEdge, FlowGraph, FlowNode
 
 __all__ = ["FlowRunner"]
@@ -149,6 +150,19 @@ class FlowRunner:
             emit(RunEvent.run_error(msg))
             return RunResult(False, outputs, msg, tuple(events))
 
+        # Props are checked BEFORE anything runs, and a failure aborts.
+        #
+        # Before a node executes, not after: a workflow whose third node needs
+        # a value the caller misspelled would otherwise do two nodes' worth of
+        # real work -- sending, writing, charging -- and only then discover the
+        # call was malformed. Validation after a side effect is not validation.
+        props_check = resolve_workflow_props(graph.inputs, options.props)
+        if props_check["ok"] is False:
+            emit(RunEvent.run_error(props_check["error"]))
+            return RunResult(False, outputs, props_check["error"], tuple(events))
+        props = props_check["props"]
+        declares_props = bool(graph.inputs)
+
         incoming_by_node = _index_incoming(graph.edges)
         start = time.monotonic()
 
@@ -209,7 +223,7 @@ class FlowRunner:
 
             emit(RunEvent.node_status(node.id, NodeStatus.RUNNING))
 
-            inputs = _collect_inputs(node, incoming, port_values, initial_inputs)
+            inputs = _collect_inputs(node, incoming, port_values, initial_inputs, props, declares_props)
             executor = executors.resolve_for(node)
             if executor is None:
                 msg = f"No executor registered for kind={node.type}"
@@ -381,6 +395,8 @@ def _collect_inputs(
     incoming: Iterable[FlowEdge],
     port_values: dict[str, Any],
     initial: dict[str, dict[str, Any]],
+    props: Mapping[str, Any] | None = None,
+    declares_props: bool = False,
 ) -> dict[str, Any]:
     """Gather a node's inputs, keyed by target-port id (default ``in``).
 
@@ -397,6 +413,21 @@ def _collect_inputs(
     three sides.
     """
     inputs: dict[str, Any] = dict(initial.get(node.id, {}))
+    props = dict(props or {})
+    incoming = list(incoming)
+
+    # ENTRY POINTS are seeded with the props by their bare names, which is what
+    # lets an existing graph keep working unchanged: a trigger reading
+    # ``{{ topic }}`` was fed by ``initial_inputs[trigger_id]["topic"]``, and a
+    # caller moving to props passes ``{"topic": ...}`` to see the same thing.
+    # Only entry points -- a node mid-graph reading a bare ``topic`` would be
+    # shadowing whatever its upstream edge is called.
+    #
+    # Never clobbers: a value the host already seeded is the host's.
+    if not incoming:
+        for name, value in props.items():
+            inputs.setdefault(name, value)
+
     for edge in incoming:
         key = _port_key(edge.source, edge.source_handle)
         if key in port_values:
@@ -415,6 +446,28 @@ def _collect_inputs(
             # the host's initial inputs or an earlier edge.
             if edge.target_handle is None and edge.source not in inputs:
                 inputs[edge.source] = port_values[key]
+    # EVERY node gets ``$props`` -- but ONLY when the workflow declares inputs.
+    #
+    # The first half makes props usable at depth: seeding entry points alone
+    # would mean a node six hops downstream had the value threaded through
+    # every edge in between, and every hop is somewhere it can be dropped. It
+    # costs nothing to resolve because ``$props`` is an ORDINARY KEY in the
+    # inputs mapping and Expr already walks dot-paths against it, so
+    # ``{{ $props.topic }}`` works with no change to any resolver in any of the
+    # three runtimes.
+    #
+    # The second half was a CORRECTION the golden parity fixtures caught. An
+    # earlier draft wrote it unconditionally, justified as "so
+    # ``{{ $props.x }}`` resolves to null rather than raising" -- not true: an
+    # unresolvable path already yields null. What it DOES do is add a key to
+    # every executor's inputs on every graph forever, which showed up as a diff
+    # in twelve stored goldens.
+    #
+    # Keyed on the DECLARATION, not on whether a value arrived: a workflow
+    # whose inputs are all optional and all omitted still declared a contract.
+    if declares_props:
+        inputs["$props"] = props
+
     return inputs
 
 

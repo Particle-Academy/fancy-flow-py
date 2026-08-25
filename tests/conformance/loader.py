@@ -84,6 +84,10 @@ def list_suites() -> list[str]:
     )
 
 
+LANGUAGE = "python"
+"""Which column of a case's `skip` map applies to this runtime."""
+
+
 def cases(suite: str) -> list[dict[str, Any]]:
     """Load one table suite's rows, enforcing the repository's own invariants.
 
@@ -113,12 +117,27 @@ def cases(suite: str) -> list[dict[str, Any]]:
             raise RuntimeError(f"Duplicate case id {case_id!r} in {suite}.")
         seen.add(case_id)
 
+        # `skip` is a MAP KEYED BY LANGUAGE, never a scalar.
+        # `{"php": "no PHP impl"}` skips PHP and nothing else.
+        #
+        # This guard used to read `not str(skip).strip()`, which is unreachable
+        # for a dict — `str({"php": "..."})` is never blank — so the
+        # empty-reason rule it names was enforced by nobody. That is half of the
+        # bug fancy-conformance's own AGENTS.md predicted for these private
+        # loader copies; `run_table` below had the other half.
         skip = row.get("skip")
-        if skip is not None and not str(skip).strip():
-            raise RuntimeError(
-                f"Case {case_id} in {suite} is skipped with no reason. Every skip must "
-                "say why, and show up in the log until it is gone."
-            )
+        if skip is not None:
+            if not isinstance(skip, dict):
+                raise RuntimeError(
+                    f"Case {case_id} in {suite} has a non-map `skip`. It must be keyed by "
+                    "language -- a scalar skips every runtime at once, silently."
+                )
+            for language, reason in skip.items():
+                if not str(reason).strip():
+                    raise RuntimeError(
+                        f"Case {case_id} in {suite} skips {language} with no reason. Every "
+                        "skip must say why, and show up in the log until it is gone."
+                    )
 
     return rows
 
@@ -129,9 +148,18 @@ def run_table(suite: str, run_case: Callable[[dict[str, Any]], Any]) -> dict[str
     passed = failed = skipped = 0
 
     for row in cases(suite):
-        if row.get("skip"):
+        # Look up THIS language, rather than testing the map for truthiness.
+        #
+        # `if row.get("skip")` was true for any non-empty map, so a row skipped
+        # for PHP alone was skipped on Python too -- and the log still read
+        # green, because a skip is not a failure. Two shipped copies of this
+        # loader had exactly this bug; it cost a real row here, where
+        # `0106-object-does-not-satisfy-array` is skipped for PHP (its input is
+        # unrepresentable there) and MUST run on Python.
+        reason = (row.get("skip") or {}).get(LANGUAGE)
+        if reason is not None:
             skipped += 1
-            results.append({"id": row["id"], "status": "skip", "reason": row["skip"]})
+            results.append({"id": row["id"], "status": "skip", "reason": reason})
             continue
         try:
             actual = run_case(row)
