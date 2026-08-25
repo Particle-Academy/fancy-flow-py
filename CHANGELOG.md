@@ -6,6 +6,45 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.4.1] - 2026-08-25
+
+Everything here came from the runtime's FIRST OUTSIDE CONSUMER, who ran the
+same 5-node graph on this engine and on the TypeScript one and diffed them.
+Their headline was that the runtime works and the outputs and event types match
+exactly; these are the edges that differ.
+
+### Fixed
+
+- **`__version__` reported a version three releases old.** It was the literal
+  `"0.1.0"` while the distribution was `0.4.0`, and nothing compared them — so
+  `pip install fancy-flow` handed you 0.4.0 and the package told you 0.1.0.
+  Anything gating on the version at runtime branched on a release that no longer
+  existed.
+
+  It is now read from the installed distribution metadata, which removes the
+  second copy rather than re-syncing it. A test asserts the property AND that
+  the literal has not come back, because re-introducing one would pass on the
+  day it was written and drift on the next release — which is how this happened
+  the first time.
+
+- **Passing a plain dict of executors raised `AttributeError: 'dict' object has
+  no attribute 'resolve_for'`** from inside the runner. A mapping is now
+  ACCEPTED and wrapped, matching the TypeScript engine, which takes a plain
+  object — porting a graph between runtimes should not require rewriting the
+  registry. Anything that is neither a registry nor a mapping raises a
+  `TypeError` naming both.
+
+- **Passing a dict as the graph raised `AttributeError: 'dict' object has no
+  attribute 'nodes'`.** It now raises a `TypeError` naming `FlowGraph` and
+  pointing at `import_workflow` for WorkflowSchema JSON.
+
+  A dict graph is deliberately NOT accepted: a mapping could be a `FlowGraph`
+  literal or a WorkflowSchema document, and guessing would make one of them
+  quietly wrong. The consumer's framing was exact — *the errors surface an
+  internal protocol name instead of telling the caller what to pass* — and both
+  entry points (`run` and `arun`) get the same treatment, since a fix applied to
+  one door makes the bug look intermittent.
+
 ## [0.4.0] - 2026-08-25
 
 ### Added

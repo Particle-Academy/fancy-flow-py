@@ -52,7 +52,33 @@ from .schema import (
 )
 from .workflow import SCHEMA_URL, SCHEMA_VERSION, export_workflow, import_workflow, to_json
 
-__version__ = "0.1.0"
+def _installed_version() -> str:
+    """This package's version, read from the INSTALLED distribution metadata.
+
+    Not a literal. A literal here is a second copy of a number that already
+    lives in ``pyproject.toml``, and the two drift: this said ``"0.1.0"`` while
+    the distribution was ``0.4.0`` — three releases stale, with nothing
+    comparing them. A consumer gating on ``fancy_flow.__version__`` read a
+    version that had not existed for weeks, and nothing anywhere reported it.
+
+    Reported by the runtime's first outside consumer, who installed 0.4.0 and
+    was told 0.1.0.
+
+    Reading from metadata removes the second copy rather than re-syncing it, so
+    there is nothing left to drift. The fallback covers a source tree that was
+    never installed — a case where ``pyproject.toml`` is the only truth and no
+    distribution exists to disagree with it.
+    """
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _distribution_version
+
+    try:
+        return _distribution_version("fancy-flow")
+    except PackageNotFoundError:  # pragma: no cover — an uninstalled source tree
+        return "0.0.0+unknown"
+
+
+__version__ = _installed_version()
 
 __all__ = [
     "SCHEMA_URL",

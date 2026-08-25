@@ -63,6 +63,63 @@ class _Step:
     executor: Callable[[ExecutionContext], Any]
 
 
+def _coerce_executors(executors: Any) -> ExecutorRegistry:
+    """Accept a plain mapping of kind -> callable, the way the TS engine does.
+
+    ``runFlow`` in ``@particle-academy/fancy-flow`` takes a plain object, so a
+    consumer porting a graph between the runtimes reaches for a dict here and
+    gets ``AttributeError: 'dict' object has no attribute 'resolve_for'`` --
+    thrown from inside the runner, naming an internal protocol method. That
+    reads as a library bug rather than "wrap it in ExecutorRegistry", which is
+    what it actually means.
+
+    Reported by the runtime's first outside consumer, who had a working TS graph
+    and expected the dict to port. Wrapping is both the smaller surprise and the
+    closer parity; anything that is neither a registry nor a mapping still fails,
+    but says what to pass.
+    """
+    if isinstance(executors, ExecutorRegistry):
+        return executors
+
+    if isinstance(executors, Mapping):
+        return ExecutorRegistry().bind_many(dict(executors))
+
+    raise TypeError(
+        "executors must be an ExecutorRegistry or a mapping of kind -> callable, "
+        f"got {type(executors).__name__}. Either pass a plain dict "
+        '({"manual_trigger": lambda ctx: ...}) or build one with '
+        "ExecutorRegistry().bind_many({...})."
+    )
+
+
+def _require_graph(graph: Any) -> FlowGraph:
+    """Fail with what to DO, rather than with an attribute name.
+
+    Passing a dict raised ``AttributeError: 'dict' object has no attribute
+    'nodes'`` from inside the walk -- the same shape of unhelpful error as the
+    executors one, and doubly surprising because the package's pitch is "same
+    WorkflowSchema JSON in, same outputs out".
+
+    A dict is NOT silently accepted, and that is deliberate rather than lazy: a
+    mapping here could be a FlowGraph-shaped literal or a WorkflowSchema
+    document, and those need different handling. Guessing would make one of them
+    quietly wrong. Naming ``import_workflow`` sends the caller to the one that
+    does the conversion properly.
+    """
+    if isinstance(graph, FlowGraph):
+        return graph
+
+    hint = (
+        " Pass a FlowGraph. For WorkflowSchema JSON use "
+        "fancy_flow.import_workflow(document).graph, which converts it and "
+        "reports any issues."
+        if isinstance(graph, Mapping)
+        else " Pass a FlowGraph."
+    )
+
+    raise TypeError(f"graph must be a FlowGraph, got {type(graph).__name__}.{hint}")
+
+
 class FlowRunner:
     """Runs a graph against an :class:`ExecutorRegistry`."""
 
@@ -86,7 +143,7 @@ class FlowRunner:
         is reported as one, rather than being silently stored as a coroutine
         object that every downstream node then receives instead of a value.
         """
-        walk = self._walk(graph, executors, on_event, options)
+        walk = self._walk(_require_graph(graph), _coerce_executors(executors), on_event, options)
         outcome: tuple[bool, Any] | None = None
         try:
             while True:
@@ -108,7 +165,7 @@ class FlowRunner:
         which is the normal case when a host adds one async HTTP node to an
         otherwise plain workflow.
         """
-        walk = self._walk(graph, executors, on_event, options)
+        walk = self._walk(_require_graph(graph), _coerce_executors(executors), on_event, options)
         outcome: tuple[bool, Any] | None = None
         try:
             while True:
