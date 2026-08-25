@@ -225,3 +225,53 @@ def test_an_empty_mapping_is_falsy_like_php(value: object, expected: bool) -> No
     so it is pinned here and recorded in the plan as a gap to promote.
     """
     assert expr.truthy(value) is expected
+
+
+def test_import_keeps_a_graphs_declared_inputs() -> None:
+    """``graph.inputs`` is what ``RunOptions.props`` is validated against.
+
+    The importer dropped it, so every imported graph declared nothing and
+    ``resolve_workflow_props`` rejected every prop with "this workflow declares
+    no inputs". The PHP twin had the identical gap, found the same day and for
+    the same reason -- both ports transcribed the node/edge loop and neither
+    carried the declaration beside it.
+    """
+    result = import_workflow(
+        {
+            "$schema": "https://particle.academy/schemas/workflow/v1.json",
+            "version": 1,
+            "graph": {
+                "inputs": [{"name": "content", "type": "string", "required": True}],
+                "nodes": [{"id": "t", "kind": "manual_trigger", "position": {"x": 0, "y": 0}}],
+                "edges": [],
+            },
+        },
+        lenient=True,
+    )
+
+    assert list(result.graph.inputs) == [
+        {"name": "content", "type": "string", "required": True}
+    ]
+
+
+def test_export_writes_declared_inputs_back() -> None:
+    """The other half of the round trip.
+
+    Import alone still loses the declaration the moment a graph designed in the
+    TypeScript editor -- which DOES emit ``graph.inputs`` -- passes through this
+    runtime and is re-exported.
+    """
+    graph = FlowGraph(nodes=(), edges=(), inputs=({"name": "topic", "type": "string"},))
+
+    schema = export_workflow(graph)
+
+    assert schema["graph"]["inputs"] == [{"name": "topic", "type": "string"}]
+
+
+def test_export_omits_inputs_for_a_graph_that_declares_none() -> None:
+    """Matches the TypeScript exporter: the key appears only when there is one.
+
+    An always-present ``"inputs": []`` would change the bytes of every graph ever
+    saved, for nothing.
+    """
+    assert "inputs" not in export_workflow(FlowGraph())["graph"]

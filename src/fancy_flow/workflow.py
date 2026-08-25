@@ -138,7 +138,25 @@ def import_workflow(
         )
 
     ok = not any(issue.is_error for issue in issues)
-    return ImportResult(ok, FlowGraph(tuple(nodes), tuple(edges)), tuple(issues))
+    # `graph.inputs` is what the workflow ACCEPTS -- the declaration
+    # `resolve_workflow_props` validates against. Dropping it meant every
+    # imported graph declared nothing, so every prop was rejected with "this
+    # workflow declares no inputs". The PHP twin had the identical gap, for the
+    # identical reason: both ports transcribed the node/edge loop and neither
+    # carried the declaration beside it.
+    #
+    # Only well-formed entries survive, and a malformed one is dropped rather
+    # than aborting the import: a bad declaration should not cost a consumer
+    # their whole graph, and `resolve_workflow_props` judges values anyway.
+    declared_inputs = tuple(
+        i
+        for i in (graph_raw.get("inputs") or [])
+        if isinstance(i, dict) and isinstance(i.get("name"), str) and i["name"]
+    )
+
+    return ImportResult(
+        ok, FlowGraph(tuple(nodes), tuple(edges), declared_inputs), tuple(issues)
+    )
 
 
 def export_workflow(
@@ -159,6 +177,10 @@ def export_workflow(
         schema["metadata"] = meta
 
     schema["graph"] = {
+        # Written only when there IS a declaration, matching the TypeScript
+        # exporter. An always-present `"inputs": []` would change the bytes of
+        # every graph ever saved, for nothing.
+        **({"inputs": [dict(i) for i in graph.inputs]} if graph.inputs else {}),
         "nodes": [_node_to_schema(n) for n in graph.nodes],
         "edges": [_edge_to_schema(e) for e in graph.edges],
     }

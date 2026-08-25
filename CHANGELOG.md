@@ -6,6 +6,37 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.6.1] - 2026-08-25
+
+### Fixed
+
+- **`graph.inputs` was dropped on import and never written on export**, so a
+  workflow's own declaration of what it ACCEPTS did not survive this runtime.
+
+  That declaration is what `resolve_workflow_props` validates against, so every
+  imported graph declared nothing and **every prop was rejected** with *"this
+  workflow declares no inputs"*. Props shipped in 0.4.0 and could not be used on
+  any graph loaded from a schema — which is every graph that came from anywhere.
+
+  Export had the mirror problem: a graph designed in the TypeScript editor —
+  which does emit `graph.inputs` — passed through here and came out silently
+  undeclared.
+
+  **The PHP twin had the identical gap, found the same day and reported by a
+  consumer who hit it there.** Both ports transcribed the node/edge loop and
+  neither carried the declaration beside it — a shape worth naming, because
+  nothing failed: the graph imported cleanly, ran cleanly, and simply refused
+  every value.
+
+  A malformed entry is dropped rather than aborting the import. A bad
+  declaration should not cost a consumer their whole graph, and
+  `resolve_workflow_props` judges values anyway.
+
+  **What to do: nothing.** A graph that declares no inputs behaves exactly as
+  before, and `export` still omits the key entirely when there is nothing to
+  write — an always-present `"inputs": []` would change the bytes of every graph
+  ever saved.
+
 ## [0.6.0] - 2026-08-25
 
 ### Added
