@@ -231,9 +231,7 @@ def import_workflow(
         if isinstance(i, dict) and isinstance(i.get("name"), str) and i["name"]
     )
 
-    return ImportResult(
-        ok, FlowGraph(tuple(nodes), tuple(edges), declared_inputs), tuple(issues)
-    )
+    return ImportResult(ok, FlowGraph(tuple(nodes), tuple(edges), declared_inputs), tuple(issues))
 
 
 def export_workflow(

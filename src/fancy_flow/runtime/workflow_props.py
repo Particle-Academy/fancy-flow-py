@@ -153,9 +153,7 @@ def resolve_workflow_props(
                 return {
                     "ok": False,
                     "code": TYPE_MISMATCH,
-                    "error": (
-                        f'Workflow input "{name}" expects {declared_type}, got {actual}.'
-                    ),
+                    "error": (f'Workflow input "{name}" expects {declared_type}, got {actual}.'),
                 }
 
         resolved[name] = value

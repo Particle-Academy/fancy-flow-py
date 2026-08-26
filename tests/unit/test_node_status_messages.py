@@ -232,14 +232,16 @@ def test_status_messages_survive_the_document_round_trip() -> None:
     """
     from fancy_flow import export_workflow, import_workflow
 
-    original = graph([
-        FlowNode(
-            "a",
-            "@particle-academy/manual_trigger",
-            starting_msg="Starting the deep analysis",
-            stopping_msg="Analysis complete",
-        )
-    ])
+    original = graph(
+        [
+            FlowNode(
+                "a",
+                "@particle-academy/manual_trigger",
+                starting_msg="Starting the deep analysis",
+                stopping_msg="Analysis complete",
+            )
+        ]
+    )
 
     doc = export_workflow(original)
     node = doc["graph"]["nodes"][0]

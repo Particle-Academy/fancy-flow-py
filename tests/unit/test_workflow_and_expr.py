@@ -251,9 +251,7 @@ def test_import_keeps_a_graphs_declared_inputs() -> None:
         lenient=True,
     )
 
-    assert list(result.graph.inputs) == [
-        {"name": "content", "type": "string", "required": True}
-    ]
+    assert list(result.graph.inputs) == [{"name": "content", "type": "string", "required": True}]
 
 
 def test_export_writes_declared_inputs_back() -> None:

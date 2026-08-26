@@ -97,9 +97,7 @@ def _run_case(case: dict[str, Any]) -> str | None:
     if resolved is None:
         return None
 
-    return resolved(
-        ExecutionContext(node=node, inputs={}, emit=lambda _event: None)
-    )
+    return resolved(ExecutionContext(node=node, inputs={}, emit=lambda _event: None))
 
 
 def test_matches_the_executor_resolution_table() -> None:
@@ -131,9 +129,7 @@ def test_the_wildcard_is_never_written_by_alias_expansion() -> None:
     in the terms of the mechanism that produces it.
     """
     kinds = NodeKindRegistry()
-    kinds.register(
-        NodeKind(name="*", category="conformance", label="*", aliases=("everything",))
-    )
+    kinds.register(NodeKind(name="*", category="conformance", label="*", aliases=("everything",)))
 
     executors = ExecutorRegistry(kinds=kinds)
     executors.bind("everything", lambda _ctx: "aliased-star")
