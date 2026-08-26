@@ -311,6 +311,17 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "user_input",
+            # Emits exactly the field keys its author defined -- no static list
+            # can know them. human.py:29-32 returns the submitted `values`,
+            # which the host fills from these declared fields.
+            "outputShape": lambda config: [
+                {
+                    "path": str(f.get("key", "")),
+                    "type": "unknown",
+                    "description": str(f.get("label", "")),
+                }
+                for f in (config.get("fields") or [])
+            ],
             "category": "human",
             "label": "User Input",
             "description": "Pause the flow until the user submits the configured form.",
@@ -685,6 +696,36 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         # ---------------- AI ----------------
         {
             "name": "llm_call",
+            # Config-dependent: `data` exists only when the author asked for a
+            # schema (ai.py:37 reads response_schema; ai.py:80 sets `data`). The
+            # rest is the client contract -- text always, usage/raw when the
+            # provider reports them.
+            "outputShape": lambda config: [
+                f
+                for f in (
+                    {"path": "text", "type": "string", "description": "The model's completion."},
+                    (
+                        {
+                            "path": "data",
+                            "type": "unknown",
+                            "description": "The parsed, schema-checked result.",
+                        }
+                        if config.get("response_schema")
+                        else None
+                    ),
+                    {
+                        "path": "usage",
+                        "type": "object",
+                        "description": "Token counts, when the provider reports them.",
+                    },
+                    {
+                        "path": "raw",
+                        "type": "unknown",
+                        "description": "The provider's untouched response.",
+                    },
+                )
+                if f is not None
+            ],
             "category": "ai",
             "label": "LLM Call",
             "description": "Send a prompt + context to a model and receive a response.",

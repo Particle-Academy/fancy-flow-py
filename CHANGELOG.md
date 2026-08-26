@@ -6,6 +6,32 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.11.0] - 2026-08-26
+
+### Added
+
+- **Runs the shared `flow/kind-declaration-surface` table** — 20 cases asserting
+  this runtime declares the same things about the same kinds as the other three.
+
+### Fixed
+
+- **`llm_call` and `user_input` were not config-dependent here, and the shared
+  table caught it on its first run.** Both are Closures in the PHP and
+  TypeScript twins; here they were undeclared, so a consumer asking what
+  `llm_call` emits got `None` — *nobody declared* — rather than *depends on
+  config, ask the host*.
+
+  Those are different answers requiring different responses, and the difference
+  is the whole point of the field. `llm_call` now gains `data` only when the
+  author set a `response_schema` (`ai.py:37`, `ai.py:80`), and `user_input`
+  emits the keys its author defined (`human.py:29-32`).
+
+  Worth recording HOW it was found: the fixture had run zero rows against this
+  runtime until this release, and its first run reported exactly this. A
+  parity table that nothing points at is not a check — that gap was flagged as
+  remaining work before it was closed, and closing it immediately produced two
+  real findings.
+
 ## [0.10.0] - 2026-08-26
 
 ### Added
