@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from ..schema.graph import PortDescriptor
 
-__all__ = ["UNSET", "ConfigField", "NodeKind"]
+__all__ = ["UNSET", "ConfigField", "NodeKind", "OutputShape"]
 
 #: Sentinel distinguishing "no default declared" from an explicit ``None``.
 UNSET: Final = object()
@@ -86,6 +87,11 @@ class ConfigField:
         return out
 
 
+#: A kind's output shape: a static field list, or a callable of the node's own
+#: config. The callable form is the important one -- see ``NodeKind.output_shape``.
+OutputShape = list[dict[str, Any]] | Callable[[dict[str, Any]], list[dict[str, Any]] | None]
+
+
 @dataclass(frozen=True, slots=True)
 class NodeKind:
     """An authorable node type -- its shape, ports and config schema.
@@ -116,6 +122,48 @@ class NodeKind:
     #: node saying a second attempt is not a repeat of the first (git_pr_open
     #: opens a second pull request). Only the durable driver consults it.
     side_effects: str | None = None
+    #: The FIELDS this kind emits -- not its ports. ``{{ in.text }}`` is a
+    #: field; ``outputs`` is where an edge attaches. Different questions, and
+    #: only this one answers "does that field exist".
+    #:
+    #: Three states, and the third is why it is nullable:
+    #:   ``None``   -- NOT DECLARED. Nobody has said. Unknown.
+    #:   ``[]``     -- declares that it emits no fields.
+    #:   a list     -- ``[{"path": "text", "type": "string"}, ...]``
+    #:
+    #: Collapsing ``None`` into ``[]`` is the bug this field was added to fix:
+    #: a consumer reading "no shape" as "emits nothing" refuses a legitimate
+    #: ``{{ in.title }}``, and a false rejection cannot be complied with.
+    #:
+    #: A CALLABLE is a first-class form, not an escape hatch -- a ``user_input``
+    #: emits the keys its author defined and a ``system_event`` its event's
+    #: payload, and no static list knows either. Read it through
+    #: :meth:`output_shape_for`, never directly, so both forms resolve the same
+    #: way and a caller cannot handle only the one it met first.
+    output_shape: OutputShape | None = None
+
+    #: What :meth:`to_dict` writes for a callable-backed shape. A callable
+    #: cannot cross a JSON boundary; dropping it would make the manifest say
+    #: "no outputShape", which reads as "emits nothing" -- the failure this
+    #: field exists to prevent, reintroduced at the serialisation seam.
+    DYNAMIC_OUTPUT_SHAPE: ClassVar[str] = "dynamic"
+
+    def output_shape_for(self, config: dict[str, Any]) -> list[dict[str, Any]] | None:
+        """The fields emitted for ``config``, or ``None`` when undeclared."""
+        if self.output_shape is None:
+            return None
+        if callable(self.output_shape):
+            return self.output_shape(config)
+        return list(self.output_shape)
+
+    def has_dynamic_output_shape(self) -> bool:
+        """True when the shape depends on config and cannot be serialised.
+
+        A manifest reader needs this to tell "config-dependent, ask the
+        runtime" from "nothing declared" -- the same absent-vs-empty
+        distinction, one level down.
+        """
+        return callable(self.output_shape)
 
     def ids(self) -> list[str]:
         """Every id this kind answers to, canonical first.
@@ -146,6 +194,15 @@ class NodeKind:
             aliases=tuple(str(a) for a in (raw.get("aliases") or ())),
             pauses_for_human=_opt_str(raw.get("pausesForHuman")),
             side_effects=_opt_str(raw.get("sideEffects")),
+            # A manifest saying DYNAMIC comes back as a callable yielding None:
+            # "a shape exists, and this process cannot resolve it". Keeping the
+            # marker string would push that decision onto every caller, and the
+            # caller that forgets reads it as a field list.
+            output_shape=(
+                (lambda _config: None)
+                if raw.get("outputShape") == NodeKind.DYNAMIC_OUTPUT_SHAPE
+                else raw.get("outputShape")
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -175,6 +232,12 @@ class NodeKind:
             out["pausesForHuman"] = self.pauses_for_human
         if self.side_effects is not None:
             out["sideEffects"] = self.side_effects
+        if self.output_shape is not None:
+            out["outputShape"] = (
+                NodeKind.DYNAMIC_OUTPUT_SHAPE
+                if callable(self.output_shape)
+                else list(self.output_shape)
+            )
         return out
 
 
