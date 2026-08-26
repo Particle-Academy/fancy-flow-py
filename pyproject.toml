@@ -90,6 +90,15 @@ filterwarnings = [
 line-length = 100
 src = ["src", "tests"]
 target-version = "py311"
+# CI checks out SIBLING REPOSITORIES into the workspace -- fancy-conformance at
+# .conformance and the PHP twin at .fancy-flow-php -- and then runs
+# `ruff check .` from the root. Without this, ruff lints code this package does
+# not own and cannot fix, and the gate goes red for a reason no commit here can
+# clear. It had been red on every run since 2026-08-25 for exactly that.
+#
+# `src` above does NOT limit what is linted; it only tells isort where first-
+# party imports live. Excluding is the part that scopes the check.
+exclude = [".conformance", ".fancy-flow-php", ".third-party-allowlist"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "N", "C4", "PT"]

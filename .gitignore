@@ -11,3 +11,8 @@ build/
 .venv/
 venv/
 .env
+
+# CI checks these sibling repos out into the workspace; never commit them.
+.conformance/
+.fancy-flow-php/
+.third-party-allowlist/
