@@ -8,7 +8,7 @@ from typing import Any, ClassVar, Final
 
 from ..schema.graph import PortDescriptor
 
-__all__ = ["UNSET", "ConfigField", "NodeKind", "OutputShape"]
+__all__ = ["UNSET", "ConfigField", "EmitsRelation", "NodeKind", "OutputShape"]
 
 #: Sentinel distinguishing "no default declared" from an explicit ``None``.
 UNSET: Final = object()
@@ -91,6 +91,12 @@ class ConfigField:
 #: config. The callable form is the important one -- see ``NodeKind.output_shape``.
 OutputShape = list[dict[str, Any]] | Callable[[dict[str, Any]], list[dict[str, Any]] | None]
 
+#: How a kind's output relates to its input. See ``NodeKind.emits``.
+#:
+#: Every value is TOP-LEVEL by construction -- a relation cannot describe a
+#: value nested under a key, which is why ``wait`` declares a field list.
+EmitsRelation = str | Callable[[dict[str, Any]], str | None]
+
 
 @dataclass(frozen=True, slots=True)
 class NodeKind:
@@ -141,6 +147,30 @@ class NodeKind:
     #: :meth:`output_shape_for`, never directly, so both forms resolve the same
     #: way and a caller cannot handle only the one it met first.
     output_shape: OutputShape | None = None
+    #: How this kind's output RELATES to its input, when the relation is what is
+    #: knowable rather than a field list.
+    #:
+    #: ``output_shape`` answers *which fields*; this answers *where they come
+    #: from*. Separate because they are separate questions, and one field
+    #: carrying sometimes-a-list-sometimes-a-keyword is one a reader handles
+    #: only in the form it met first.
+    #:
+    #:   ``"input"``            emits its input unchanged
+    #:   ``"inputs-merged"``    the union of every input's fields
+    #:   ``"expression:<key>"`` the shape the expression in THAT config key
+    #:                          names -- the key is part of the value, because a
+    #:                          consumer hardcoding "the field called
+    #:                          expression" has copied our knowledge one level
+    #:                          down, which is the thing this removes
+    #:   a callable of config   for a kind whose relation depends on its config
+    #:
+    #: **A relation with no destination can only express a TOP-LEVEL merge.**
+    #: ``wait`` returns ``{"waited": …, "duration": …, "input": …}`` -- it NESTS
+    #: its input under a key, so a relation there would make a reader accept
+    #: ``{{ in.<any inbound field> }}`` at top level, which resolves to nothing
+    #: at run time. Read the executor and ask *merge or nest* before assigning
+    #: one; under-claiming is free.
+    emits: EmitsRelation | None = None
 
     #: What :meth:`to_dict` writes for a callable-backed shape. A callable
     #: cannot cross a JSON boundary; dropping it would make the manifest say
@@ -155,6 +185,28 @@ class NodeKind:
         if callable(self.output_shape):
             return self.output_shape(config)
         return list(self.output_shape)
+
+    def emits_for(self, config: dict[str, Any]) -> str | None:
+        """The relation for ``config``, or ``None`` when none was declared."""
+        if self.emits is None:
+            return None
+        if callable(self.emits):
+            return self.emits(config)
+        return self.emits
+
+    def expression_config_key(self, config: dict[str, Any]) -> str | None:
+        """The config key an ``expression:`` relation names, or ``None``.
+
+        ``transform`` reads ``config["expression"]``; ``variable`` reads
+        ``config["value"]``. A consumer must not assume either.
+
+        NOTE the limit, which over-permits when missed: an expression's shape is
+        knowable only when the whole string is a SINGLE reference. Interpolating
+        several yields a string with no addressable fields.
+        """
+        relation = self.emits_for(config)
+        prefix = "expression:"
+        return relation[len(prefix) :] if relation and relation.startswith(prefix) else None
 
     def has_dynamic_output_shape(self) -> bool:
         """True when the shape depends on config and cannot be serialised.
@@ -194,6 +246,7 @@ class NodeKind:
             aliases=tuple(str(a) for a in (raw.get("aliases") or ())),
             pauses_for_human=_opt_str(raw.get("pausesForHuman")),
             side_effects=_opt_str(raw.get("sideEffects")),
+            emits=raw.get("emits"),
             # A manifest saying DYNAMIC comes back as a callable yielding None:
             # "a shape exists, and this process cannot resolve it". Keeping the
             # marker string would push that decision onto every caller, and the
@@ -232,6 +285,8 @@ class NodeKind:
             out["pausesForHuman"] = self.pauses_for_human
         if self.side_effects is not None:
             out["sideEffects"] = self.side_effects
+        if self.emits is not None and not callable(self.emits):
+            out["emits"] = self.emits
         if self.output_shape is not None:
             out["outputShape"] = (
                 NodeKind.DYNAMIC_OUTPUT_SHAPE

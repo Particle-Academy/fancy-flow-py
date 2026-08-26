@@ -6,6 +6,48 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.10.0] - 2026-08-26
+
+### Added
+
+- **`emits` — how a kind's output RELATES to its input.** The half a field list
+  cannot express, and the reason a consumer was reimplementing our executors'
+  semantics in a static analyser with nothing to fail when they changed.
+
+  `output_shape` answers *which fields*; `emits` answers *where they come from*:
+  `"input"`, `"inputs-merged"`, `"expression:<key>"`, or a callable of config.
+  Read via `emits_for(config)`; `expression_config_key(config)` returns the key
+  an expression relation names.
+
+  **The config key is part of the value.** `transform` reads `expression`,
+  `variable` reads `value` — a consumer hardcoding "the field called expression"
+  has copied our knowledge one level down, which is the thing this removes.
+
+  Declared: `branch`, `switch_case`, `output`, `human_approval`,
+  `manual_trigger` (`input`); `variable` (`expression:value`); `transform` and
+  `merge` (callables); `schedule_trigger` (`inputs-merged`, composed with its
+  own `cron`/`timezone` list). Every one read from THIS runtime's executor and
+  cited.
+
+### Two rules the design needed, both from a consumer reading executors
+
+- **A relation with no destination can only express a TOP-LEVEL merge.** `wait`
+  returns `{"waited": …, "duration": …, "input": …}` — it **nests** its input
+  under a key, so a relation there would make a reader accept
+  `{{ in.<any inbound field> }}` at top level, which resolves to nothing at run
+  time. It keeps a static list with an opaque `input` field instead.
+
+- **`merge` in `concat` mode declares NO relation and no field list.** It emits
+  a list, whose elements are not addressable as top-level fields; `[]` would
+  claim "emits no fields", which is false and would refuse every reference.
+
+  `schedule_trigger` moved the other way for the same reason: its partial
+  `["cron","timezone"]` list was unsafe only while nothing could say the inputs
+  also merge.
+
+- `webhook_trigger` deliberately declares nothing — its choice is **data**-
+  dependent, not config-dependent, so no relation is honest.
+
 ## [0.9.0] - 2026-08-26
 
 ### Added
