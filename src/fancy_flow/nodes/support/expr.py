@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any, Final
+from typing import Any, Final, Literal, NamedTuple
 
 __all__ = ["evaluate", "resolve_path", "text", "truthy"]
 
@@ -75,21 +75,74 @@ def _interpolate(template: str, resolve: Callable[[str], str]) -> str:
         i = close_at + 2
 
 
-def resolve_path(path: str, context: dict[str, Any]) -> Any:
-    """Resolve a dot-path against the context, honouring the ``$json`` alias.
+class UnresolvedPathError(Exception):
+    """Raised by the ``"throw"`` policy when an expression path does not resolve."""
 
-    ``$json`` and ``$input`` both point at the ``in`` port value when the
-    context has one, and at the whole context otherwise -- the fallback that
-    makes ``{{ $json.x }}`` work on a trigger node with no upstream input.
+    def __init__(self, path: str) -> None:
+        self.path = path
+        super().__init__(
+            f'Expression path "{path}" did not resolve. Under the "throw" policy an '
+            "unresolvable path is an error rather than an empty string."
+        )
 
-    A path that does not resolve returns ``None``. Lists are addressed by
-    numeric segment, matching PHP list access; nothing else is special-cased,
-    which is on purpose. JavaScript resolves ``list.length`` because arrays
-    carry a ``length`` property, and PHP does not -- so neither does this.
+
+class Resolution(NamedTuple):
+    """What a resolution attempt ANSWERS -- did the path resolve, and to what.
+
+    ``resolve_path`` cannot express this, and that is the defect this exists to
+    fix: it returns ``None`` both for "this path does not exist" and for "this
+    path exists and holds None". One value standing for two states.
+
+    At the interpolation layer the collapse is worse, because ``None``
+    stringifies to ``""``. The consumer who reported it put it exactly:
+
+        "An unresolvable path yields ``''``, so a wrong field is
+        indistinguishable from an empty one at runtime."
+
+    A misspelled field renders as an empty string, which looks precisely like a
+    field that is legitimately empty. The graph runs, the node succeeds, and
+    the output is quietly missing a value nobody is told about -- worst on
+    LLM-authored graphs, where the field name was guessed to begin with.
+
+    Same shape as the four ``or``/``??``-style collapses fixed across all four
+    runtimes on 2026-08-26 (absent vs null), one layer up. A second return
+    channel rather than a cleverer sentinel, because **every sentinel is a
+    legal value for somebody**.
+    """
+
+    resolved: bool
+    """Whether the path resolved at all. ``False`` means it does not exist."""
+
+    value: Any
+    """The value, when ``resolved``. ``None`` when not -- do not read it blind."""
+
+
+_MISSING = Resolution(False, None)
+
+UnresolvedPolicy = Literal["empty", "keep", "throw"]
+"""What evaluation does with a path that does not resolve.
+
+- ``"empty"`` -- today's behaviour, and the DEFAULT. Interpolates to ``""``; a
+  whole expression yields ``None``. Unchanged so that adding this API breaks
+  nobody; opt-in before default was the reporting consumer's own condition.
+- ``"keep"`` -- leave the ``{{ ... }}`` text in place, so the failure is VISIBLE
+  in the output without stopping the run. A rendered ``{{ in.recipient_naem }}``
+  is self-diagnosing in a way an absence never is.
+- ``"throw"`` -- raise :class:`UnresolvedPathError` rather than deliver a
+  silently incomplete result.
+"""
+
+
+def try_resolve_path(path: str, context: dict[str, Any]) -> Resolution:
+    """Resolve a dot-path, reporting WHETHER it resolved.
+
+    The same walk as :func:`resolve_path` -- deliberately, since that function
+    is now defined in terms of this one. Two copies of a traversal agree right
+    up until someone edits one of them, and nothing anywhere reports that.
     """
     trimmed = path.strip()
     if trimmed == "":
-        return None
+        return _MISSING
 
     segments = trimmed.split(".")
 
@@ -102,12 +155,12 @@ def resolve_path(path: str, context: dict[str, Any]) -> Any:
     for segment in segments:
         if isinstance(cursor, dict):
             if segment not in cursor:
-                return None
+                return _MISSING
             cursor = cursor[segment]
         elif isinstance(cursor, (list, tuple)):
             index = _as_index(segment)
             if index is None or index >= len(cursor):
-                return None
+                return _MISSING
             cursor = cursor[index]
         else:
             # Attribute access on arbitrary objects, to match PHP reading
@@ -115,13 +168,34 @@ def resolve_path(path: str, context: dict[str, Any]) -> Any:
             # field is author input, and `{{ x.__class__ }}` must not be a
             # doorway into the interpreter.
             if segment.startswith("_") or not hasattr(cursor, segment):
-                return None
+                return _MISSING
             cursor = getattr(cursor, segment)
 
-    return cursor
+    return Resolution(True, cursor)
 
 
-def evaluate(template: Any, context: dict[str, Any] | None = None) -> Any:
+def resolve_path(path: str, context: dict[str, Any]) -> Any:
+    """Resolve a dot-path against the context, honouring the ``$json`` alias.
+
+    ``$json`` and ``$input`` both point at the ``in`` port value when the
+    context has one, and at the whole context otherwise -- the fallback that
+    makes ``{{ $json.x }}`` work on a trigger node with no upstream input.
+
+    A path that does not resolve returns ``None`` -- and so does a path that
+    resolves TO ``None``. Use :func:`try_resolve_path` when you need to tell
+    those apart. Lists are addressed by numeric segment, matching PHP list
+    access; nothing else is special-cased, which is on purpose. JavaScript
+    resolves ``list.length`` because arrays carry a ``length`` property, and
+    PHP does not -- so neither does this.
+    """
+    return try_resolve_path(path, context).value
+
+
+def evaluate(
+    template: Any,
+    context: dict[str, Any] | None = None,
+    on_unresolved: UnresolvedPolicy = "empty",
+) -> Any:
     """Evaluate a template against a context.
 
     A string that is EXACTLY one expression returns the resolved value with its
@@ -140,9 +214,28 @@ def evaluate(template: Any, context: dict[str, Any] | None = None) -> Any:
 
     whole = _whole_expression(trimmed)
     if whole is not None:
-        return resolve_path(whole, context)
+        r = try_resolve_path(whole, context)
+        if r.resolved:
+            return r.value
+        # This branch yields None under "empty", not "" -- what it has always
+        # done, and the asymmetry is deliberate: this branch preserves TYPE, so
+        # its absent value is the typed one.
+        if on_unresolved == "throw":
+            raise UnresolvedPathError(whole)
+        return template if on_unresolved == "keep" else None
 
-    return _interpolate(template, lambda path: _stringify(resolve_path(path, context)))
+    def _resolve(path: str) -> str:
+        r = try_resolve_path(path, context)
+        if r.resolved:
+            return _stringify(r.value)
+        if on_unresolved == "throw":
+            raise UnresolvedPathError(path)
+        # The raw inner text goes back verbatim, so a round trip is
+        # byte-identical -- a "kept" template returning subtly reformatted
+        # would be its own small lie.
+        return "{{" + path + "}}" if on_unresolved == "keep" else ""
+
+    return _interpolate(template, _resolve)
 
 
 def truthy(value: Any) -> bool:

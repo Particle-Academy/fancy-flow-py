@@ -6,6 +6,92 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.15.0] - 2026-08-26
+
+### Added
+
+- **`try_resolve_path()` — telling "did not resolve" apart from "resolved to
+  empty".**
+
+  `resolve_path()` returns `None` both for a path that does not exist and for one
+  that exists holding `None`, and at the interpolation layer that collapses
+  further to `""`. In the reporting consumer's words: *"An unresolvable path
+  yields `''`, so a wrong field is indistinguishable from an empty one at
+  runtime."* A misspelled field renders as an empty string, exactly like a field
+  that is legitimately empty — worst on LLM-authored graphs, where the field name
+  was guessed to begin with.
+
+  Same shape as the collapses fixed in 0.12.0–0.14.0, one layer up. A second
+  return channel (a `NamedTuple` of `resolved` / `value`) rather than a cleverer
+  sentinel, because **every sentinel is a legal value for somebody**: `""`,
+  `None` and `False` are all things a real payload carries.
+
+- **`evaluate(template, context, on_unresolved)`** — `"empty"` (today's
+  behaviour, the DEFAULT), `"keep"` (leave the `{{ … }}` text so the failure is
+  visible in the output without stopping the run), `"throw"` (raise
+  `UnresolvedPathError`, which carries `.path`).
+
+  **Nothing to do.** The default is unchanged and every existing call keeps its
+  behaviour; opt-in before default was the reporting consumer's own condition.
+  Implemented identically in `@particle-academy/fancy-flow` and
+  `particle-academy/fancy-flow-php`, with the three test files mirroring each
+  other case for case.
+
+### Changed
+
+- `resolve_path()` is now defined in terms of `try_resolve_path()` rather than
+  repeating the walk. No answer changes — two copies of a traversal agree right
+  up until someone edits one of them.
+
+## Versions 0.12.0 – 0.14.0 were tagged but NEVER PUBLISHED
+
+Read this before looking for them on PyPI: **`pip install fancy-flow==0.13.0`
+will fail.** The index went 0.11.0 → 0.15.0, and every change described below
+reached users in **0.15.0**.
+
+The tooling behaved correctly throughout. `publish.yml` refuses a tag whose
+version has no `CHANGELOG.md` entry, so all three publishes were rejected for
+exactly the right reason — three red runs, and nobody was looking at them. The
+same three fixes were blocked identically in `fancy-flow` (npm), so six tags
+across two ecosystems carried work that never reached a consumer. Only the PHP
+twin received them, because Packagist syncs from the tag with no gate.
+
+The entries keep their own version numbers because the git tags exist and
+someone reading `git log` needs to find them. A preflight now runs the same
+assertion before `git tag`, which is the only moment the failure is preventable.
+
+## [0.14.0] - 2026-08-26 — tagged, not published (see above)
+
+### Added
+
+- **`emits: "input-map-merged"` — merging the input MAP is not merging the
+  payloads**, and one keyword was covering both. `manual_trigger` and
+  `schedule_trigger` merge the raw input map; `merge` unions each port's
+  PAYLOAD. Those coincide only at an entry point, because `_collect_inputs`
+  seeds an entry node FLAT and keys every other node by handle.
+
+  **Nothing to do** — a declaration about existing behaviour; no node changed
+  what it emits.
+
+## [0.13.0] - 2026-08-26 — tagged, not published (see above)
+
+### Fixed
+
+- **A port bound to `None` was treated as an ABSENT port**, so reading an input
+  fell back to its default when the port held an explicit `None`. The fallback
+  itself is right and stays — a trigger has no `in` edge — but only the ABSENT
+  case may fall back. **The rule: `or` / `is None` shortcuts are safe only where
+  null is not a legal value**; key presence is the only correct test.
+
+## [0.12.0] - 2026-08-26 — tagged, not published (see above)
+
+### Fixed
+
+- **A branching node whose payload is `None` emitted the wrapper downstream.**
+  The two port sugars unwrapped asymmetrically, so a downstream node received
+  the `{branch, value}` wrapper — fields no kind declares — while the declared
+  ones were absent.
+
 ## [0.11.0] - 2026-08-26
 
 ### Added
