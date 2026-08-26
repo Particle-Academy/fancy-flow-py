@@ -226,8 +226,10 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         # ---------------- Triggers ----------------
         {
             "name": "manual_trigger",
-            # Read from trigger.py:19 -- returns ctx.inputs.
-            "emits": "input",
+            # trigger.py:19 returns ctx.inputs -- the raw MAP, not the "in"
+            # port. Flat at an entry point, port-keyed the moment the node has
+            # an inbound edge, which is why this is not "input".
+            "emits": "input-map-merged",
             "category": "trigger",
             "label": "Manual",
             "description": "Entry point fired when the user clicks Run.",
@@ -284,7 +286,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
                 },
             ],
             # Read from trigger.py:38-44 -- out.update(ctx.inputs) at the TOP level.
-            "emits": "inputs-merged",
+            "emits": "input-map-merged",
             "category": "trigger",
             "label": "Schedule",
             "description": "Fires on a cron schedule (host-implemented).",
