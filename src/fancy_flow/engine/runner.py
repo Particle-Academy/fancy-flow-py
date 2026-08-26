@@ -357,7 +357,16 @@ class FlowRunner:
                 # `r.value ?? r` on the peer runtimes: an omitted value carries
                 # the whole result object.
                 value = result.get("value")
-                return [result["branch"]], result if value is None else value
+                # `in result`, NOT `is None`. Two different questions:
+                #   no "value" key at all -> the whole result IS the payload
+                #   "value" present, None -> the payload is None; pass it on
+                # Testing `is None` cannot tell them apart, so a branch whose
+                # payload was None leaked the WRAPPER downstream -- every
+                # following node received {"branch": ..., "value": None}, two
+                # fields no kind declares. The reachable path is an upstream
+                # `transform` whose dot-path did not resolve. All four runtimes
+                # shared this identically, so no parity table could catch it.
+                return [result["branch"]], (value if "value" in result else result)
 
         declared = node.outputs
 
