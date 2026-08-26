@@ -82,12 +82,30 @@ class ExecutionContext:
     def input(self, port: str = "in", default: Any = None) -> Any:
         """Read one input port's value.
 
-        Absent AND ``None`` both yield ``default`` — the peer runtimes spell
-        this ``??``, and matching them here is what keeps a graph's behaviour
-        identical when a dead branch contributes nothing.
+        A port BOUND to ``None`` is NOT an absent port, and only the absent one
+        falls back.
+
+        This used to say the opposite -- that absent and ``None`` both yield
+        ``default``, matching the peers' ``??`` -- and it was a faithful port of
+        a defect. Eleven executors read ``ctx.input("in", ctx.inputs)``, whose
+        default is the whole inputs map, so a port holding ``None`` yielded
+        every input the node had rather than ``None``. The substitute is
+        PLAUSIBLE, which is what makes it worse than a visibly-odd one: an
+        inputs map looks exactly like real data, so a downstream node reads
+        fields from the wrong place and nothing looks wrong anywhere.
+
+        The fallback itself is right and stays: a trigger has no ``in`` edge,
+        and "the ``in`` port, or everything if there is no ``in`` port" is what
+        lets an entry node read its seeded payload.
+
+        The rule, which cost four instances in one day to learn: **``??`` (and
+        ``is None``, and ``unwrap_or``) is safe only where null is not a legal
+        value.** Where it is, key presence is the only correct test.
         """
-        value = self.inputs.get(port)
-        return default if value is None else value
+        # dict.get already has exactly the right semantics: it returns a
+        # STORED None and falls back only when the key is absent. It was the
+        # explicit `is None` check layered on top that was wrong.
+        return self.inputs.get(port, default)
 
     def config(self) -> dict[str, Any]:
         """The node's resolved config."""
