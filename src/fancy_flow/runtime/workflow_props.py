@@ -31,7 +31,8 @@ go red having changed nothing.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 UNKNOWN_INPUT = "unknown_input"
 MISSING_REQUIRED = "missing_required"

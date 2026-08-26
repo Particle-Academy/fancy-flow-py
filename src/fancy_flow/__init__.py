@@ -59,6 +59,7 @@ from .workflow import (
     to_json,
 )
 
+
 def _installed_version() -> str:
     """This package's version, read from the INSTALLED distribution metadata.
 

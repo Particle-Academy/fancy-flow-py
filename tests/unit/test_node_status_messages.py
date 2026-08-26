@@ -22,7 +22,6 @@ Nothing warned, because an unregistered kind fails closed with no outputs.
 from __future__ import annotations
 
 from fancy_flow import (
-    ExecutorRegistry,
     FlowEdge,
     FlowGraph,
     FlowNode,
@@ -60,7 +59,16 @@ def test_announces_start_before_the_node_and_end_after_it() -> None:
         order.append("executed")
         return 1
 
-    g = graph([FlowNode("a", "step", starting_msg="Starting the deep analysis", stopping_msg="Analysis complete")])
+    g = graph(
+        [
+            FlowNode(
+                "a",
+                "step",
+                starting_msg="Starting the deep analysis",
+                stopping_msg="Analysis complete",
+            )
+        ]
+    )
 
     assert narration_of(g, step_registry(step)) == [
         "start:Starting the deep analysis",
@@ -81,7 +89,16 @@ def test_does_not_announce_completion_when_the_node_raises() -> None:
     def boom(ctx):
         raise RuntimeError("model refused")
 
-    g = graph([FlowNode("a", "step", starting_msg="Starting the deep analysis", stopping_msg="Analysis complete")])
+    g = graph(
+        [
+            FlowNode(
+                "a",
+                "step",
+                starting_msg="Starting the deep analysis",
+                stopping_msg="Analysis complete",
+            )
+        ]
+    )
 
     assert narration_of(g, step_registry(boom)) == ["start:Starting the deep analysis"]
 
@@ -111,7 +128,12 @@ def test_narrates_a_two_node_run_in_execution_order() -> None:
     # The example this was built for: analyse, then save.
     g = graph(
         [
-            FlowNode("a", "step", starting_msg="Starting the deep analysis", stopping_msg="Analysis complete"),
+            FlowNode(
+                "a",
+                "step",
+                starting_msg="Starting the deep analysis",
+                stopping_msg="Analysis complete",
+            ),
             FlowNode("b", "step", starting_msg="Saving report"),
         ],
         [FlowEdge("e1", "a", "b")],

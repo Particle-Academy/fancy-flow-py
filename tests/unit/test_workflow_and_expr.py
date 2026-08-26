@@ -7,6 +7,7 @@ import json
 import pytest
 
 from fancy_flow import (
+    SCHEMA_VERSION,
     FlowEdge,
     FlowGraph,
     FlowNode,
@@ -14,9 +15,8 @@ from fancy_flow import (
     WorkflowMetadata,
     builtin,
     export_workflow,
-    SCHEMA_VERSION,
-    migrate_schema,
     import_workflow,
+    migrate_schema,
     to_json,
 )
 from fancy_flow.nodes.support import expr

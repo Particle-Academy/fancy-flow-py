@@ -296,7 +296,9 @@ class FlowRunner:
 
             emit(RunEvent.node_status(node.id, NodeStatus.RUNNING))
 
-            inputs = _collect_inputs(node, incoming, port_values, initial_inputs, props, declares_props)
+            inputs = _collect_inputs(
+                node, incoming, port_values, initial_inputs, props, declares_props
+            )
             executor = executors.resolve_for(node)
             if executor is None:
                 msg = f"No executor registered for kind={node.type}"
