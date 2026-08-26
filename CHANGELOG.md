@@ -6,6 +6,37 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.9.0] - 2026-08-26
+
+### Added
+
+- **Eight builtin kinds declare what they emit** — `api_request`,
+  `embed_search`, `llm_router`, `notify`, `webhook_out`, `for_each`, `wait`,
+  `log`.
+
+  Every row was read from **this runtime's** executor and cited beside the
+  declaration (`ai.py:229`, `human.py:56`, `logic.py:63`, `logic.py:118`,
+  `io_.py:57-61`, `output.py:24`, …). None was copied from the PHP or
+  TypeScript declarations: two declarations agreeing is not evidence, and that
+  is exactly how a consumer's hand-maintained table drifted into refusing a
+  legitimate field while accepting one that did not exist.
+
+  They agree with the other two runtimes, which — arrived at independently — is
+  evidence.
+
+### Deliberately still undeclared
+
+- `branch`, `switch_case`, `output`, `transform`, `merge`, `manual_trigger`,
+  `webhook_trigger`, `human_approval`, `variable`, `schedule_trigger`. They emit
+  what arrived, so their shape is not knowable from the kind alone, and `None`
+  is the honest answer — read it as *unknown, do not refuse*, never as *emits
+  nothing*. A test asserts they stay that way.
+
+  `schedule_trigger` is the sharp case: it merges its inputs into the TOP level,
+  so a partial list of `["cron", "timezone"]` would make a validator **refuse
+  every merged-in key**. A partial static list on a merging kind is a
+  false-rejection generator.
+
 ## [0.8.0] - 2026-08-26
 
 ### Added

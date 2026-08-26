@@ -380,6 +380,11 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "for_each",
+            # Read from logic.py:63.
+            "outputShape": [
+                {"path": "items", "type": "array", "description": "The list that was iterated."},
+                {"path": "count", "type": "number", "description": "How many items it held."},
+            ],
             "category": "logic",
             "label": "For Each",
             "description": "Iterate over a list, emitting each item on `item`.",
@@ -495,6 +500,16 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "wait",
+            # Read from logic.py:118.
+            "outputShape": [
+                {"path": "waited", "type": "string", "description": "Which wait mode ran."},
+                {"path": "duration", "type": "number", "description": "How long it waited."},
+                {
+                    "path": "input",
+                    "type": "unknown",
+                    "description": "The value that arrived, carried forward.",
+                },
+            ],
             "category": "logic",
             "label": "Wait",
             "description": "Sleep or wait for an external event.",
@@ -703,6 +718,16 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
             # so graphs already carrying `llm_branch` keep resolving. Config
             # keys are unchanged.
             "name": "llm_router",
+            # Read from ai.py:229.
+            "outputShape": [
+                {"path": "route", "type": "string", "description": "The port the model chose."},
+                {"path": "reason", "type": "string", "description": "Why the model chose it."},
+                {
+                    "path": "input",
+                    "type": "unknown",
+                    "description": "The value that arrived, carried forward.",
+                },
+            ],
             "category": "ai",
             "label": "LLM Router",
             "aliases": ["llm_branch", "@fancy/llm_branch"],
@@ -806,6 +831,15 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "embed_search",
+            # Read from ai.py:266.
+            "outputShape": [
+                {"path": "query", "type": "string", "description": "The query that was embedded."},
+                {
+                    "path": "matches",
+                    "type": "array",
+                    "description": "Vector-store hits for the query.",
+                },
+            ],
             "category": "ai",
             "label": "Embed & Search",
             "description": "Embed a query and search a vector store.",
@@ -837,6 +871,12 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         # ---------------- IO ----------------
         {
             "name": "api_request",
+            # Read from io_.py:39 -- the HttpClient result, which webhook_out reads as status/body.
+            "outputShape": [
+                {"path": "status", "type": "number", "description": "HTTP status code."},
+                {"path": "headers", "type": "object", "description": "Response headers."},
+                {"path": "body", "type": "unknown", "description": "Parsed response body."},
+            ],
             "category": "io",
             "label": "API Request",
             "description": "HTTP request to any URL.",
@@ -867,6 +907,24 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "webhook_out",
+            # Read from io_.py:57-61.
+            "outputShape": [
+                {
+                    "path": "sent",
+                    "type": "boolean",
+                    "description": "True once the request was made.",
+                },
+                {
+                    "path": "status",
+                    "type": "number",
+                    "description": "HTTP status, when the transport reported one.",
+                },
+                {
+                    "path": "response",
+                    "type": "unknown",
+                    "description": "The response body, when there was one.",
+                },
+            ],
             "category": "io",
             "label": "Send Webhook",
             "description": "POST a payload to a configured URL.",
@@ -930,6 +988,17 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "notify",
+            # Read from human.py:56.
+            "outputShape": [
+                {
+                    "path": "sent",
+                    "type": "boolean",
+                    "description": "True once the message was handed to the channel.",
+                },
+                {"path": "channel", "type": "string", "description": "The channel it went to."},
+                {"path": "to", "type": "string", "description": "The recipient."},
+                {"path": "message", "type": "string", "description": "The rendered message."},
+            ],
             "category": "human",
             "label": "Notify",
             "description": "Send a message via Slack / email / SMS / etc.",
@@ -969,6 +1038,15 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "log",
+            # Read from output.py:24.
+            "outputShape": [
+                {
+                    "path": "logged",
+                    "type": "string",
+                    "description": "The message that was written.",
+                },
+                {"path": "level", "type": "string", "description": "The level it was written at."},
+            ],
             "category": "output",
             "label": "Log",
             "description": "Send to the run feed.",
