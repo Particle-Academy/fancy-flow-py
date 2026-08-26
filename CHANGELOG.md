@@ -6,6 +6,38 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.7.0] - 2026-08-25
+
+### Added
+
+- **`migrate_schema()` — a stored graph written against an OLDER schema now
+  upgrades on read instead of being rejected.**
+
+  The version has always been on the document. Only the TypeScript runtime acted
+  on it — this runtime compared it and errored on any mismatch. So the day schema
+  v2 was cut, **every stored graph would have hard-failed to import here.** On the
+  PHP twin, which shares the defect, that is where durable runs RESUME, so a run
+  parked on a human approval would have become unresumable.
+
+  It could only ever be fixed BEFORE the bump: afterwards the documents are
+  already unreadable by the very code meant to migrate them.
+
+  Three rules — a **past** version migrates forward step by step; a **future**
+  version is left ALONE, because we cannot know what a later schema means and
+  guessing downward is worse than the version check reporting it; and a **gap**
+  in the step table is left alone for the same reason.
+
+  **What to do: nothing.** The table is empty because v1 is current, so every
+  document passes through untouched.
+
+  `steps` is a parameter rather than a hard-coded lookup because otherwise the
+  seam could not be tested: with only v1 in existence there is no old document to
+  migrate, so a test against the built-in table would pass identically against a
+  function that did nothing.
+
+  The PHP twin ships the identical seam in 0.31.0, and TypeScript gained the same
+  step-table shape in 0.56.0. One design, three runtimes.
+
 ## [0.6.1] - 2026-08-25
 
 ### Fixed

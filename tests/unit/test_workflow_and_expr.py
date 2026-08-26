@@ -14,6 +14,8 @@ from fancy_flow import (
     WorkflowMetadata,
     builtin,
     export_workflow,
+    SCHEMA_VERSION,
+    migrate_schema,
     import_workflow,
     to_json,
 )
@@ -275,3 +277,61 @@ def test_export_omits_inputs_for_a_graph_that_declares_none() -> None:
     saved, for nothing.
     """
     assert "inputs" not in export_workflow(FlowGraph())["graph"]
+
+
+# --- schema migration -------------------------------------------------------
+#
+# The version has always been on the document; only the TypeScript runtime acted
+# on it. This runtime and the PHP one compared it and errored, so the day schema
+# v2 is cut every stored Op hard-fails to import on both SERVER runtimes -- which
+# is where durable runs RESUME. A run parked on an approval would become
+# unresumable, and the fix cannot be applied afterwards: the graphs are already
+# unreadable by the code meant to migrate them.
+#
+# ``migrate`` takes its step table as an ARGUMENT so these can be tested. With
+# only v1 in existence there is no old document to migrate, so a seam tested
+# against the built-in (empty) table is a check that CANNOT fail -- it would pass
+# identically against a ``migrate`` that returned its input untouched.
+
+
+def test_migrate_carries_a_past_version_forward() -> None:
+    def to_v1(s: dict) -> dict:
+        s["graph"]["nodes"][0]["kind"] = "manual_trigger"
+        return s
+
+    migrated = migrate_schema(
+        {
+            "$schema": "https://particle.academy/schemas/workflow/v1.json",
+            "version": 0,
+            "graph": {"nodes": [{"id": "t", "kind": "OLD_NAME"}], "edges": []},
+        },
+        {0: to_v1},
+    )
+
+    assert migrated["version"] == SCHEMA_VERSION
+    assert migrated["graph"]["nodes"][0]["kind"] == "manual_trigger"
+
+
+def test_migrate_refuses_to_walk_a_future_version_downward() -> None:
+    """We cannot know what a later schema means; guessing would be worse."""
+    doc = {
+        "$schema": "https://particle.academy/schemas/workflow/v1.json",
+        "version": 99,
+        "graph": {"nodes": [], "edges": []},
+    }
+
+    assert migrate_schema(doc, {0: lambda s: s}) == doc
+
+    result = import_workflow(doc)
+    assert result.ok is False
+
+
+def test_migrate_leaves_a_document_alone_when_no_step_exists() -> None:
+    """A gap in the table is not a licence to guess."""
+    doc = {
+        "$schema": "https://particle.academy/schemas/workflow/v1.json",
+        "version": 0,
+        "graph": {"nodes": [], "edges": []},
+    }
+
+    assert migrate_schema(doc, {}) == doc

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fancy-flow"
-version = "0.6.1"
+version = "0.7.0"
 description = "Python runtime for fancy-flow workflow graphs - the third twin of @particle-academy/fancy-flow's engine. Same WorkflowSchema JSON in, same outputs out."
 readme = "README.md"
 # 3.11, not the modal 3.10: 3.10 reaches end of life on 2026-10-31, and a floor

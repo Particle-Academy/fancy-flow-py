@@ -50,7 +50,14 @@ from .schema import (
     PortDescriptor,
     WorkflowMetadata,
 )
-from .workflow import SCHEMA_URL, SCHEMA_VERSION, export_workflow, import_workflow, to_json
+from .workflow import (
+    SCHEMA_URL,
+    SCHEMA_VERSION,
+    export_workflow,
+    import_workflow,
+    migrate_schema,
+    to_json,
+)
 
 def _installed_version() -> str:
     """This package's version, read from the INSTALLED distribution metadata.
@@ -118,6 +125,7 @@ __all__ = [
     "default_registry",
     "export_workflow",
     "import_workflow",
+    "migrate_schema",
     "reset_default_registry",
     "to_json",
 ]

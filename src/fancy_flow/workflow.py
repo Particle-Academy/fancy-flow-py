@@ -11,16 +11,80 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any, Final
 
 from .registry.registry import NodeKindRegistry, default_registry
 from .schema.graph import FlowEdge, FlowGraph, FlowNode, WorkflowMetadata
 from .schema.issues import ERROR, WARNING, ImportIssue, ImportResult
 
-__all__ = ["SCHEMA_URL", "SCHEMA_VERSION", "export_workflow", "import_workflow", "to_json"]
+__all__ = ["SCHEMA_URL", "SCHEMA_VERSION", "export_workflow", "import_workflow", "migrate_schema", "to_json"]
 
 SCHEMA_VERSION: Final = 1
 SCHEMA_URL: Final = "https://particle.academy/schemas/workflow/v1.json"
+
+
+_MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+"""Every migration step, keyed by the version it upgrades FROM.
+
+A step keyed ``N`` takes a version-N document to version N+1. Empty today
+because v1 is current -- when a BREAKING bump lands, add the step here and every
+stored document upgrades on read, in this runtime and its twins.
+"""
+
+
+def migrate_schema(
+    schema: dict[str, Any],
+    steps: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    """Upgrade a schema document to the current version, as far as it can go.
+
+    Why this exists, and why it had to exist BEFORE it was needed
+    ------------------------------------------------------------
+
+    The version has always been on the document; only the TypeScript runtime
+    acted on it. This runtime and the PHP one compared it and errored -- so the
+    day schema v2 was cut, every stored Op would have hard-failed to import on
+    both SERVER runtimes, which is where durable runs RESUME. A run parked on a
+    human approval would have become unresumable, and the fix could not be
+    applied afterwards: the graphs would already be unreadable by the very code
+    meant to migrate them.
+
+    The three rules, each with a reason
+    -----------------------------------
+
+    - A **past** version migrates forward, step by step, to the current one.
+    - A **future** version is left ALONE. We cannot know what a later schema
+      means, and migrating downward would be guessing; untouched hands it to the
+      version check, which reports it honestly.
+    - A **gap** in the table is left alone too. A missing step is not a licence
+      to guess.
+
+    Nothing here changes behaviour today -- with an empty table every document
+    passes through untouched -- which is exactly what makes it safe to add now
+    rather than under pressure later.
+
+    ``steps`` is an argument rather than a hard-coded lookup because otherwise
+    this seam could not be TESTED: with only v1 in existence there is no old
+    document to migrate, and a test against the built-in table would pass
+    identically against a function that did nothing at all.
+    """
+    table = _MIGRATIONS if steps is None else steps
+    version = schema.get("version")
+
+    if not isinstance(version, int) or isinstance(version, bool) or version >= SCHEMA_VERSION:
+        return schema
+
+    while version < SCHEMA_VERSION:
+        step = table.get(version)
+        if step is None:
+            return schema
+
+        schema = step(schema)
+        version += 1
+        schema["version"] = version
+
+    return schema
 
 
 def import_workflow(
@@ -48,6 +112,12 @@ def import_workflow(
         return ImportResult(False, FlowGraph(), (ImportIssue.error("Schema is not an object."),))
 
     version = schema.get("version")
+    # Best-effort forward migration BEFORE the version check, so a document
+    # written against an older schema is upgraded rather than rejected. The
+    # check below is still the gate.
+    schema = migrate_schema(schema)
+    version = schema.get("version")
+
     if version != SCHEMA_VERSION:
         issues.append(
             ImportIssue(
