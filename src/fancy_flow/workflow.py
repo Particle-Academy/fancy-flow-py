@@ -15,6 +15,7 @@ from collections.abc import Callable
 from typing import Any, Final
 
 from .registry.registry import NodeKindRegistry, default_registry
+from .analysis.graph_connectivity import check_graph_connectivity
 from .schema.graph import FlowEdge, FlowGraph, FlowNode, WorkflowMetadata
 from .schema.issues import ERROR, WARNING, ImportIssue, ImportResult
 
@@ -213,6 +214,18 @@ def import_workflow(
                 label=label if isinstance(label, str) else None,
             )
         )
+
+    # WIRING, not merely dataflow: a node no edge reaches and that reaches no
+    # edge, and an edge reading from a node that publishes nothing.
+    #
+    # Deliberately AFTER the edge loop, so it sees the same edges the engine
+    # will -- a dangling edge is dropped with a warning above, and running this
+    # first would let a dropped edge count as a connection.
+    #
+    # Deliberately NOT gated on `lenient`. That flag is about unknown
+    # VOCABULARY (a kind this host has not registered), never about wiring; a
+    # floating node floats in every registry.
+    issues.extend(check_graph_connectivity(nodes, edges, registry))
 
     ok = not any(issue.is_error for issue in issues)
     # `graph.inputs` is what the workflow ACCEPTS -- the declaration

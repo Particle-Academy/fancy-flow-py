@@ -6,6 +6,44 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.16.0] - 2026-08-26
+
+### Added
+
+- **`import_workflow` now refuses a graph containing a node that cannot take
+  part in it.** The Python twin of `fancy-flow-php` 0.48 and the TypeScript
+  runtime's 0.64, so all three agree.
+
+  Two shapes, both of which imported clean and then quietly did nothing. Both
+  were MEASURED against the engine first, and neither of them fails:
+
+  - **A floating node** — no inbound and no outbound edge. It is not skipped: a
+    node with no incoming edge is a root, so the topological sort runs it. A
+    three-node graph with one stray `log` executed `t,lonely,o`. It runs
+    disconnected, receiving nothing and reaching nobody.
+  - **An edge whose SOURCE is a terminal node** (`output`, `log` — the kinds
+    declaring an empty output-port list). Measured: `t -> output -> log`
+    imported clean and the `log` RAN, with `{{ input }}` resolving to `""`.
+
+  **What may float:** a `note` (across every id it answers to), any kind
+  categorised `annotation` or `layout` — a swimlane is never wired to anything,
+  which is what a lane IS — and any kind the registry does not know. That last
+  one is not a loophole: an unknown kind already produces its own issue, and we
+  cannot know whether it is a step, an annotation or a lane, so claiming it must
+  be wired would assert something unverifiable.
+
+  New: `fancy_flow.analysis.check_graph_connectivity` / `may_float`.
+
+### What a consumer must do
+
+**Almost certainly nothing.** Only `import_workflow` changed; nothing about
+running a graph did.
+
+Where you WILL see it: loading a saved document with a stray node now returns
+`ok=False` with an error naming that node's id (or the edge id, for a terminator
+edge), and every offending node is reported at once rather than one per round
+trip. If a stray node was a comment, make it a `note`.
+
 ## [0.15.0] - 2026-08-26
 
 ### Added
