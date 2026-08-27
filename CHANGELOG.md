@@ -6,6 +6,24 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.16.1] - 2026-08-26
+
+### Fixed
+
+- **`check_graph_connectivity` / `may_float` crashed when called without a
+  registry.** Both fell back to `NodeKindRegistry.default()`, which is the PHP
+  twin's API and does not exist here — Python's is the module-level
+  `default_registry()`. Any direct call omitting the `registry` argument raised
+  `AttributeError`.
+
+  `import_workflow` always passes one, so nothing shipped in 0.16.0 hit it; the
+  public helpers did. Caught by `mypy`, not by the suite — every test passed a
+  registry explicitly, so the default branch had no coverage at all.
+
+- Two test names using capitals (`N802`) and an import ordering, both of which
+  failed `ruff` in CI while the tag was already cut. 0.16.0's `Tests` run was
+  red for lint on `main` even though `Publish` succeeded.
+
 ## [0.16.0] - 2026-08-26
 
 ### Added

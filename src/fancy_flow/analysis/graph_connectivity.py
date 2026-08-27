@@ -35,7 +35,7 @@ The twin of ``FancyFlow\\Analysis\\GraphConnectivity`` (PHP) and
 from __future__ import annotations
 
 from ..registry import kind_id
-from ..registry.registry import NodeKindRegistry
+from ..registry.registry import NodeKindRegistry, default_registry
 from ..schema.graph import FlowEdge, FlowNode
 from ..schema.issues import ImportIssue
 
@@ -49,7 +49,7 @@ def check_graph_connectivity(
 ) -> list[ImportIssue]:
     """Every connectivity problem in the graph, as import issues."""
     if registry is None:
-        registry = NodeKindRegistry.default()
+        registry = default_registry()
 
     has_incoming: set[str] = set()
     has_outgoing: set[str] = set()
@@ -123,7 +123,7 @@ def may_float(node: FlowNode, registry: NodeKindRegistry | None = None) -> bool:
        second time wrongly.
     """
     if registry is None:
-        registry = NodeKindRegistry.default()
+        registry = default_registry()
 
     if not node.type:
         return False

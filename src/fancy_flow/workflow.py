@@ -14,8 +14,8 @@ import time
 from collections.abc import Callable
 from typing import Any, Final
 
-from .registry.registry import NodeKindRegistry, default_registry
 from .analysis.graph_connectivity import check_graph_connectivity
+from .registry.registry import NodeKindRegistry, default_registry
 from .schema.graph import FlowEdge, FlowGraph, FlowNode, WorkflowMetadata
 from .schema.issues import ERROR, WARNING, ImportIssue, ImportResult
 

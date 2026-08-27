@@ -184,7 +184,7 @@ def test_the_exemption_does_not_extend_to_an_ordinary_kind() -> None:
     )
 
 
-def test_an_unknown_kind_is_not_ALSO_called_floating_on_top_of_its_own_error() -> None:
+def test_an_unknown_kind_is_not_also_called_floating_on_top_of_its_own_error() -> None:
     # We cannot know whether an unknown kind is a step, an annotation or a
     # lane, so claiming it must be wired asserts something unverifiable -- and
     # it lands hardest on the graphs that deserve it least. A laned graph
@@ -213,7 +213,7 @@ def test_an_edge_whose_source_is_a_terminal_node_is_refused() -> None:
     )
 
 
-def test_the_offending_EDGE_is_named_not_the_node() -> None:
+def test_the_offending_edge_is_named_not_the_node() -> None:
     found = errors(
         [node("t", "manual_trigger"), node("out", "output"), node("after", "log")],
         [
