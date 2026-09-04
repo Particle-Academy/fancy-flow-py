@@ -6,6 +6,35 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [0.17.0] - 2026-09-03
+
+### Fixed
+
+- **`inputs` is written and read at the TOP level of the WorkflowSchema, where
+  the TypeScript runtime puts it.** `export_workflow` wrote it inside `graph`
+  and `import_workflow` read it from there, so each runtime looked exactly
+  where the other had not put it. A workflow authored in the TS editor loaded
+  here with its declaration silently gone, and every prop then became
+  `Unknown workflow input "..."` — an error that blames the caller for a bug in
+  the loader. A Python export lost the declaration in the other direction
+  (fancy-flow#10).
+
+  `exportWorkflow` spreads `{ inputs }` beside `$schema`, `version` and
+  `graph`, and `importWorkflow` reads `s.inputs` from that level. This now
+  matches on both sides.
+
+  **BREAKING for anything reading Python's output by path:** exported documents
+  carry `inputs` at the root, no longer under `graph`. Reading a graph through
+  `import_workflow` needs no change. Documents this exporter wrote BEFORE this
+  release still load — the nested location is still accepted on import, because
+  dropping those would be the same failure aimed at our own users.
+
+  The existing test asserted the nested location on the stated belief that the
+  TS editor "DOES emit `graph.inputs`". It does not, and that assertion is what
+  held the divergence in place rather than catching it.
+
+---
+
 ## [0.16.1] - 2026-08-26
 
 ### Fixed

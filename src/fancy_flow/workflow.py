@@ -238,9 +238,24 @@ def import_workflow(
     # Only well-formed entries survive, and a malformed one is dropped rather
     # than aborting the import: a bad declaration should not cost a consumer
     # their whole graph, and `resolve_workflow_props` judges values anyway.
+    # `inputs` is a SIBLING of `graph`, not a member of it — that is where
+    # `importWorkflow` reads it (`s.inputs`) and where `exportWorkflow` writes
+    # it. Reading it from inside `graph` meant each runtime looked exactly
+    # where the other had not put it, so a TS-authored workflow loaded here
+    # with its declaration silently gone and every prop became
+    # `Unknown workflow input "..."` — an error blaming the caller for a bug
+    # in the loader.
+    #
+    # The nested spot is still accepted, because documents this exporter wrote
+    # before the fix have it there; dropping those would be the same failure
+    # aimed at our own users.
+    raw_inputs = schema.get("inputs")
+    if not isinstance(raw_inputs, list):
+        raw_inputs = graph_raw.get("inputs") or []
+
     declared_inputs = tuple(
         i
-        for i in (graph_raw.get("inputs") or [])
+        for i in raw_inputs
         if isinstance(i, dict) and isinstance(i.get("name"), str) and i["name"]
     )
 
@@ -264,11 +279,15 @@ def export_workflow(
         meta["updatedAt"] = round(time.time() * 1000)
         schema["metadata"] = meta
 
+    # Top level, beside `$schema`/`version`/`graph` — the level `exportWorkflow`
+    # writes and `importWorkflow` reads. Written only when there IS a
+    # declaration: an always-present `"inputs": []` would change the bytes of
+    # every graph ever saved, and `[]` is the different, positive claim that
+    # the workflow declares no inputs.
+    if graph.inputs:
+        schema["inputs"] = [dict(i) for i in graph.inputs]
+
     schema["graph"] = {
-        # Written only when there IS a declaration, matching the TypeScript
-        # exporter. An always-present `"inputs": []` would change the bytes of
-        # every graph ever saved, for nothing.
-        **({"inputs": [dict(i) for i in graph.inputs]} if graph.inputs else {}),
         "nodes": [_node_to_schema(n) for n in graph.nodes],
         "edges": [_edge_to_schema(e) for e in graph.edges],
     }

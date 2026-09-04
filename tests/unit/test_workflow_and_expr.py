@@ -7,6 +7,7 @@ import json
 import pytest
 
 from fancy_flow import (
+    SCHEMA_URL,
     SCHEMA_VERSION,
     FlowEdge,
     FlowGraph,
@@ -257,24 +258,28 @@ def test_import_keeps_a_graphs_declared_inputs() -> None:
 def test_export_writes_declared_inputs_back() -> None:
     """The other half of the round trip.
 
-    Import alone still loses the declaration the moment a graph designed in the
-    TypeScript editor -- which DOES emit ``graph.inputs`` -- passes through this
-    runtime and is re-exported.
+    This previously asserted ``schema["graph"]["inputs"]``, on the stated belief
+    that the TypeScript editor "DOES emit ``graph.inputs``". It does not:
+    ``exportWorkflow`` spreads ``{ inputs }`` beside ``$schema``/``version``/
+    ``graph``, and ``importWorkflow`` reads ``s.inputs`` from that same level.
+    The assertion pinned the divergence in place rather than catching it.
     """
     graph = FlowGraph(nodes=(), edges=(), inputs=({"name": "topic", "type": "string"},))
 
     schema = export_workflow(graph)
 
-    assert schema["graph"]["inputs"] == [{"name": "topic", "type": "string"}]
+    assert schema["inputs"] == [{"name": "topic", "type": "string"}]
+    assert "inputs" not in schema["graph"]
 
 
 def test_export_omits_inputs_for_a_graph_that_declares_none() -> None:
     """Matches the TypeScript exporter: the key appears only when there is one.
 
     An always-present ``"inputs": []`` would change the bytes of every graph ever
-    saved, for nothing.
+    saved, and ``[]`` is the different, positive claim that the workflow declares
+    no inputs.
     """
-    assert "inputs" not in export_workflow(FlowGraph())["graph"]
+    assert "inputs" not in export_workflow(FlowGraph())
 
 
 # --- schema migration -------------------------------------------------------
@@ -333,3 +338,59 @@ def test_migrate_leaves_a_document_alone_when_no_step_exists() -> None:
     }
 
     assert migrate_schema(doc, {}) == doc
+
+
+def test_declared_inputs_live_at_the_top_level_like_typescript() -> None:
+    """`inputs` is a sibling of `graph`, not a member of it.
+
+    The two runtimes have to agree on WHERE the declaration lives, not merely
+    that they both handle one. `exportWorkflow` in TypeScript spreads
+    `{ inputs }` alongside `$schema`, `version` and `graph`, and
+    `importWorkflow` reads `s.inputs` from that same level. Python wrote and
+    read it one level down, inside `graph`, so each runtime looked exactly
+    where the other had not put it: a TS-authored workflow loaded in Python
+    with its inputs silently gone, and a Python export dropped a declaration
+    the TS editor would have preserved.
+
+    The symptom is a caller-blaming error — every prop becomes
+    `Unknown workflow input "..."` — which points at the caller for a bug in
+    the loader.
+    """
+    builtin.register()
+
+    graph = FlowGraph(
+        nodes=(FlowNode(id="t", type="manual_trigger"),),
+        inputs=({"name": "symbol", "type": "string", "required": True},),
+    )
+
+    doc = export_workflow(graph)
+
+    assert doc["inputs"] == [{"name": "symbol", "type": "string", "required": True}]
+    assert "inputs" not in doc["graph"]
+
+    # And a document written by the TypeScript runtime must survive the trip in.
+    assert import_workflow(doc).graph.inputs == graph.inputs
+
+
+def test_inputs_written_by_the_older_python_exporter_still_load() -> None:
+    """Documents already on disk have `inputs` under `graph`.
+
+    Reading only the new location would silently drop the declaration of every
+    workflow Python itself saved before this fix — the same failure, aimed at
+    our own users instead of TypeScript's.
+    """
+    builtin.register()
+
+    legacy = {
+        "$schema": SCHEMA_URL,
+        "version": SCHEMA_VERSION,
+        "graph": {
+            "inputs": [{"name": "symbol", "type": "string", "required": True}],
+            "nodes": [{"id": "t", "kind": "manual_trigger", "position": {"x": 0, "y": 0}}],
+            "edges": [],
+        },
+    }
+
+    assert import_workflow(legacy).graph.inputs == (
+        {"name": "symbol", "type": "string", "required": True},
+    )
