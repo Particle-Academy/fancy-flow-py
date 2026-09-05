@@ -10,6 +10,7 @@ from ..schema.graph import FlowNode
 from .events import RunEvent
 from .identity import RunIdentity
 from .pause import Pause, PauseSignal
+from .terminal import TerminalAccess
 
 __all__ = ["ExecutionContext"]
 
@@ -29,9 +30,12 @@ class ExecutionContext:
       host supplied no identity, and that is a real answer: a write with no key
       must decline or accept one attempt, never invent a key. See
       :class:`~fancy_flow.runtime.identity.RunIdentity`.
+    - ``terminal`` the terminal this node's lane owns, or ``None`` outside one.
+      Both its members are callables, so the terminal opens on first USE -- a
+      node inside a terminal lane that never touches it spawns no process.
     """
 
-    __slots__ = ("_emit", "depth", "executors", "inputs", "node", "run")
+    __slots__ = ("_emit", "depth", "executors", "inputs", "node", "run", "terminal")
 
     def __init__(
         self,
@@ -41,6 +45,7 @@ class ExecutionContext:
         depth: int = 0,
         run: RunIdentity | None = None,
         executors: Any = None,
+        terminal: TerminalAccess | None = None,
     ) -> None:
         self.node = node
         self.inputs = inputs
@@ -54,6 +59,10 @@ class ExecutionContext:
         # a host that had REPLACED a builtin got the package's version in the
         # child. Same graph, different behaviour by nesting depth.
         self.executors = executors
+        # The terminal this node's lane owns, or None when it is not inside a
+        # terminal lane. None is a REAL answer: a terminal node outside a lane
+        # must say so rather than quietly opening a shell of its own.
+        self.terminal = terminal
 
     def abort(self, reason: str | None = None) -> NoReturn:
         """Stop the run. Raises :class:`RunAborted`; the runner records the reason."""

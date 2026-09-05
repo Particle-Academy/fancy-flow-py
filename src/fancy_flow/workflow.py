@@ -179,6 +179,14 @@ def import_workflow(
             starting_msg=str(raw["startingMsg"]) if raw.get("startingMsg") is not None else None,
             stopping_msg=str(raw["stoppingMsg"]) if raw.get("stoppingMsg") is not None else None,
             config=config,
+            # Visual layout, carried rather than dropped. `parentId` decides
+            # which terminal lane contains a node, so losing it does not merely
+            # flatten a canvas — it changes what a graph DOES.
+            parent_id=str(raw["parentId"]) if raw.get("parentId") is not None else None,
+            extent=raw.get("extent"),
+            width=float(raw["width"]) if raw.get("width") is not None else None,
+            height=float(raw["height"]) if raw.get("height") is not None else None,
+            style=dict(raw["style"]) if isinstance(raw.get("style"), dict) else None,
             # inputs/outputs intentionally left None on import - the engine then
             # falls back to the kind's ports, or a single `out`, matching the
             # TypeScript import.
@@ -331,6 +339,18 @@ def _node_to_schema(node: FlowNode) -> dict[str, Any]:
         out["stoppingMsg"] = node.stopping_msg
     if node.config:
         out["config"] = node.config
+    # Omitted when unset, matching the TypeScript writer, so a graph of plain
+    # nodes gains no empty keys and a saved diff stays readable.
+    if node.parent_id is not None:
+        out["parentId"] = node.parent_id
+    if node.extent is not None:
+        out["extent"] = node.extent
+    if node.width is not None:
+        out["width"] = node.width
+    if node.height is not None:
+        out["height"] = node.height
+    if node.style:
+        out["style"] = node.style
     return out
 
 

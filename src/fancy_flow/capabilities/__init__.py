@@ -30,14 +30,21 @@ __all__ = [
     "LlmRoute",
     "LlmRouteChoice",
     "LlmRouteRequest",
+    "TerminalExit",
+    "TerminalHost",
+    "TerminalSession",
+    "TerminalSessionSpec",
     "WorkflowResolutionFailure",
     "WorkflowResolver",
     "llm_client",
     "llm_unavailable_message",
     "reset",
     "set_llm_client",
+    "set_terminal_host",
     "set_workflow_resolver",
     "status",
+    "terminal_host",
+    "terminal_unavailable_message",
     "workflow_resolver",
 ]
 
@@ -146,8 +153,76 @@ class WorkflowResolver(Protocol):
 
 # -- module state --------------------------------------------------------
 
+
+@dataclass(frozen=True, slots=True)
+class TerminalSessionSpec:
+    """What a terminal lane asks its host to spawn.
+
+    Every field is optional: a lane that names nothing wants the host's default
+    shell in the host's default place, which is what a person opening a terminal
+    gets.
+    """
+
+    command: str | None = None
+    args: tuple[str, ...] = ()
+    cwd: str | None = None
+    env: dict[str, str] | None = None
+    cols: int | None = None
+    rows: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalExit:
+    """How a terminal ended. ``signal`` is a NAME, because that is how one reads."""
+
+    exit_code: int
+    signal: str | None = None
+
+
+@runtime_checkable
+class TerminalSession(Protocol):
+    """One running terminal.
+
+    Deliberately NOT carrying a ``wait_for(pattern)``. Matching is derivable
+    from ``on_data``, so putting it here would mean every host implementing the
+    same rule -- and matching that differs per host is a class of bug nobody can
+    reproduce. Core owns matching; the host owns the process.
+    """
+
+    id: str
+
+    async def write(self, data: str) -> None:
+        """Send input. A carriage return is Enter; the caller supplies it."""
+        ...
+
+    def on_data(self, listener: Callable[[str], None]) -> Callable[[], None]:
+        """Subscribe to output. Returns an unsubscribe callable."""
+        ...
+
+    async def wait_exit(self) -> TerminalExit:
+        """Resolve when the process ends.
+
+        Raced by every wait, which is what lets a dead shell be reported as a
+        dead shell rather than as "timed out waiting for X" -- a symptom that
+        sends the reader to lengthen a timeout on a process that is not running.
+        """
+        ...
+
+    async def close(self) -> None:
+        """Tear the terminal down."""
+        ...
+
+
+@runtime_checkable
+class TerminalHost(Protocol):
+    """Spawns terminals. Supplied by a desktop app; core spawns nothing."""
+
+    async def open(self, spec: TerminalSessionSpec) -> TerminalSession: ...
+
+
 _llm_client: LlmClient | None = None
 _workflow_resolver: WorkflowResolver | None = None
+_terminal_host: TerminalHost | None = None
 
 
 def set_llm_client(client: LlmClient | None) -> Callable[[], None]:
@@ -173,6 +248,44 @@ def llm_unavailable_message() -> str:
         "No LLM client is registered, so llm_router cannot ask a model which route to "
         "take. Register one with fancy_flow.capabilities.set_llm_client(client) - any "
         "object with choose_route(LlmRouteRequest) -> LlmRouteChoice will do."
+    )
+
+
+def set_terminal_host(host: TerminalHost | None) -> Callable[[], None]:
+    """Install the host's terminal spawner. Returns an unregister callable.
+
+    Written so unregistering a REPLACED host does not clear the current one:
+    two hosts installed in sequence leave the first's callable in somebody's
+    hands, and calling it later must not silently remove the second -- which
+    would leave the engine with no terminal and nothing saying one went away.
+    """
+    global _terminal_host
+    _terminal_host = host
+
+    def unregister() -> None:
+        global _terminal_host
+        if _terminal_host is host:
+            _terminal_host = None
+
+    return unregister
+
+
+def terminal_host() -> TerminalHost | None:
+    return _terminal_host
+
+
+def terminal_unavailable_message() -> str:
+    """Why no terminal is available, phrased as what to do about it.
+
+    Named as a MISSING HOST rather than a failed open: a node in a terminal lane
+    with no host registered is a configuration problem, and calling it "the
+    terminal failed" sends someone to debug a process that was never started.
+    """
+    return (
+        "No terminal host is registered. A terminal lane needs one -- register it with "
+        "fancy_flow.capabilities.set_terminal_host(host) from the desktop app that can "
+        "spawn a PTY. Core spawns nothing: a PTY binding would force a native "
+        "dependency on every consumer, including those that never open a terminal."
     )
 
 
@@ -202,11 +315,18 @@ def status() -> dict[str, bool]:
     return {
         "llm": _llm_client is not None,
         "workflow_resolver": _workflow_resolver is not None,
+        # Listed for exactly the reason this function exists. A graph with a
+        # terminal lane and no host fails PART WAY THROUGH -- after the nodes
+        # before it have already run, and possibly written somewhere. Omitting
+        # it would make the one check built to catch that report all-clear for
+        # the case it was built for.
+        "terminal": _terminal_host is not None,
     }
 
 
 def reset() -> None:
     """Clear everything. Test isolation."""
-    global _llm_client, _workflow_resolver
+    global _llm_client, _workflow_resolver, _terminal_host
     _llm_client = None
     _workflow_resolver = None
+    _terminal_host = None

@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..executors import ExecutorRegistry
-from ..nodes import ai, data, human, io_, logic, output, structural, trigger
+from ..nodes import ai, data, human, io_, logic, output, structural, terminal, trigger
 from ..nodes.support.deps import ExecutorDeps
 from . import kind_id as kid
 from .node_kind import NodeKind
@@ -56,6 +56,13 @@ def executors(deps: ExecutorDeps | None = None, resolver: Any = None) -> Executo
     deps = deps or ExecutorDeps()
 
     bindings: dict[str, Any] = {
+        # terminal lanes -- async only, so they need FlowRunner.arun().
+        # The lane kinds themselves get NO binding: they are category
+        # "layout" and the engine walks past them, exactly as the
+        # TypeScript runtime does.
+        "terminal_run": terminal.terminal_run,
+        "terminal_send": terminal.terminal_send,
+        "terminal_await": terminal.terminal_await,
         # triggers
         "manual_trigger": trigger.manual_trigger,
         "webhook_trigger": trigger.webhook_trigger,
@@ -223,6 +230,225 @@ _HTTP_METHOD = {
 
 def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constant table
     return [
+        # ---------------- Layout ----------------
+        # Never executed. The runner skips category "layout" the way the
+        # TypeScript engine does, so these carry no executor and never appear
+        # in topological order.
+        #
+        # `lane` was missing entirely until terminal lanes were ported, so a
+        # graph containing the swimlane the TypeScript runtime ships failed
+        # here with "No executor registered for kind=lane" -- the same
+        # WorkflowSchema answering differently per runtime, which is the one
+        # guarantee this package makes.
+        {
+            "name": "lane",
+            "category": "layout",
+            "label": "Lane",
+            "description": "A swimlane that groups nodes. Never runs.",
+            "icon": "\u25a4",
+            "inputs": [],
+            "outputs": [],
+            "configSchema": [
+                {"type": "text", "key": "title", "label": "Title", "default": "Lane"},
+                {
+                    "type": "select",
+                    "key": "orientation",
+                    "label": "Orientation",
+                    "default": "horizontal",
+                    "options": [
+                        {"value": "horizontal", "label": "Row"},
+                        {"value": "vertical", "label": "Column"},
+                    ],
+                },
+            ],
+        },
+        {
+            # A lane that OWNS a terminal for the length of the run.
+            #
+            # Visually a swimlane, and "layout" for the same reason the plain
+            # lane is: a lane is not a step. What is new is that it DECLARES a
+            # resource. The runtime opens its terminal lazily, when the first
+            # terminal node inside it runs, and closes it when the run ends --
+            # so a graph that never reaches a terminal node never spawns a
+            # process, and one that does gets exactly one session however many
+            # nodes use it.
+            #
+            # Membership is `parentId`, which persists into the WorkflowSchema.
+            # That is what lets this runtime resolve the same grouping the
+            # canvas shows, with no second association to keep in sync.
+            "name": "terminal_lane",
+            "category": "layout",
+            "label": "Terminal lane",
+            "description": (
+                "A lane that owns one terminal. Opens at the first terminal node, "
+                "closes when the run ends."
+            ),
+            "icon": "\u25a3",
+            "inputs": [],
+            "outputs": [],
+            "configSchema": [
+                {"type": "text", "key": "title", "label": "Title", "default": "Terminal"},
+                {
+                    "type": "text",
+                    "key": "command",
+                    "label": "Command",
+                    "placeholder": "Leave empty for the default shell",
+                },
+                {
+                    "type": "text",
+                    "key": "cwd",
+                    "label": "Working directory",
+                    "placeholder": "Host default",
+                },
+                {"type": "keyvalue", "key": "env", "label": "Environment"},
+            ],
+        },
+        # ---------------- Terminal ----------------
+        # All three live inside a terminal lane and talk to the session that
+        # lane owns; outside one they abort by name rather than opening a shell
+        # of their own. Async, so they need FlowRunner.arun().
+        {
+            "name": "terminal_run",
+            "category": "io",
+            "label": "Run in terminal",
+            "description": "Run a shell command in the lane's terminal and wait for its exit code.",
+            "icon": "$",
+            "inputs": [{"id": "in"}],
+            "outputs": [{"id": "out", "label": "output"}],
+            "configSchema": [
+                {
+                    "type": "textarea",
+                    "key": "command",
+                    "label": "Command",
+                    "rows": 3,
+                    "required": True,
+                    "placeholder": "pytest -q",
+                    "description": (
+                        "Runs in the lane's shell, so cd and exported variables persist "
+                        "between nodes. SHELL ONLY -- a TUI never returns to a prompt, so "
+                        "use Send + Await for one."
+                    ),
+                },
+                {
+                    "type": "number",
+                    "key": "timeoutMs",
+                    "label": "Timeout (ms)",
+                    "default": 120000,
+                },
+                {
+                    "type": "switch",
+                    "key": "failOnNonZero",
+                    "label": "Fail the run on a non-zero exit",
+                    "default": True,
+                    "description": (
+                        "On by default. Turning it off means a failed command lets the run "
+                        "report success -- read the exit code on the output port and branch "
+                        "on it instead."
+                    ),
+                },
+            ],
+        },
+        {
+            "name": "terminal_send",
+            "category": "io",
+            "label": "Send to terminal",
+            "description": (
+                "Type text at whatever is running in the lane's terminal, without waiting."
+            ),
+            "icon": "\u2328",
+            "inputs": [{"id": "in"}],
+            "outputs": [{"id": "out", "label": "sent"}],
+            "configSchema": [
+                {
+                    "type": "textarea",
+                    "key": "text",
+                    "label": "Text",
+                    "rows": 4,
+                    "placeholder": "Summarise the failing test and propose a fix.",
+                    "description": (
+                        "What to type. This is how a graph prompts an agent TUI such as "
+                        "Claude Code or Codex."
+                    ),
+                },
+                {
+                    "type": "switch",
+                    "key": "submit",
+                    "label": "Press Enter",
+                    "default": True,
+                    "description": (
+                        "Off leaves the text on the input line -- useful for building one "
+                        "up across several nodes."
+                    ),
+                },
+                {
+                    "type": "switch",
+                    "key": "clearFirst",
+                    "label": "Forget earlier output first",
+                    "default": False,
+                    "description": (
+                        "Discards anything the terminal said before this send, so a "
+                        "following Await cannot match a leftover prompt."
+                    ),
+                },
+            ],
+        },
+        {
+            "name": "terminal_await",
+            "category": "io",
+            "label": "Await terminal output",
+            "description": "Wait until the lane's terminal prints something that matches.",
+            "icon": "\u23f1",
+            "inputs": [{"id": "in"}],
+            "outputs": [{"id": "out", "label": "output"}],
+            "configSchema": [
+                {
+                    "type": "text",
+                    "key": "pattern",
+                    "label": "Wait for",
+                    "required": True,
+                    "placeholder": "esc to interrupt",
+                    "description": (
+                        "Matched against the output with colour codes already stripped, "
+                        "so match what you SEE."
+                    ),
+                },
+                {
+                    "type": "select",
+                    "key": "mode",
+                    "label": "Match as",
+                    "default": "text",
+                    "options": [
+                        {"value": "text", "label": "Plain text"},
+                        {"value": "regex", "label": "Regular expression"},
+                    ],
+                    "description": (
+                        "Regex mode also returns capture groups, which is how a value gets "
+                        "out of a prompt."
+                    ),
+                },
+                {
+                    "type": "number",
+                    "key": "timeoutMs",
+                    "label": "Timeout (ms)",
+                    "default": 120000,
+                },
+                {
+                    "type": "select",
+                    "key": "onTimeout",
+                    "label": "If it never appears",
+                    "default": "fail",
+                    "options": [
+                        {"value": "fail", "label": "Fail the run"},
+                        {"value": "continue", "label": "Continue with matched: false"},
+                    ],
+                    "description": (
+                        "Failing is the default. Continuing lets the next node type at a "
+                        "process that never became ready while the run still reports "
+                        "success, so it has to be asked for."
+                    ),
+                },
+            ],
+        },
         # ---------------- Triggers ----------------
         {
             "name": "manual_trigger",

@@ -12,6 +12,7 @@ import pytest
 
 from fancy_flow import ExecutorRegistry, FlowNode, NodeKind, NodeKindRegistry, builtin
 from fancy_flow.registry import kind_id as kid
+from fancy_flow.registry.registry import never_executes
 
 # -- kind ids ------------------------------------------------------------
 
@@ -253,8 +254,12 @@ def test_every_builtin_kind_has_an_executor_bound_under_every_id() -> None:
 
     missing = []
     for kind in registry.all():
-        if kid.matches(kind.name, "note"):
-            continue  # never executed by design
+        # Exempt by the SAME rule the engine skips on, not by a second list.
+        # This read `matches(name, "note")`, so when the lane kinds arrived it
+        # demanded executors for nodes the runner walks straight past -- which
+        # is the test working, and also the moment to stop hand-listing.
+        if never_executes(kind.name, registry) is not None:
+            continue
         for kind_id in kind.ids():
             if executors.resolve_for(FlowNode("n", kind_id)) is None:
                 missing.append(kind_id)

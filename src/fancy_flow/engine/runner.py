@@ -43,10 +43,11 @@ from typing import Any, cast
 from ..exceptions import RunAborted
 from ..executors import ExecutorRegistry
 from ..registry import kind_id as kid
-from ..registry.registry import NodeKindRegistry, default_registry
+from ..registry.registry import NodeKindRegistry, default_registry, never_executes
 from ..runtime.context import ExecutionContext
 from ..runtime.events import NodeStatus, RunEvent
 from ..runtime.options import RunOptions, RunResult
+from ..runtime.terminal import TerminalAccess, TerminalSessions, spec_for_lane
 from ..runtime.workflow_props import resolve_workflow_props
 from ..schema.graph import FlowEdge, FlowGraph, FlowNode
 
@@ -128,6 +129,10 @@ class FlowRunner:
         #: the shared registry, matching the PHP twin, which reads the global.
         self._kinds = kinds
 
+    def _registry(self) -> NodeKindRegistry:
+        """The kinds this run resolves against. ``None`` means the shared one."""
+        return self._kinds if self._kinds is not None else default_registry()
+
     # -- drivers ---------------------------------------------------------
 
     def run(
@@ -200,6 +205,23 @@ class FlowRunner:
             events.append(event)
             if on_event is not None:
                 on_event(event)
+
+        # One terminal per terminal lane, opened lazily by the first node
+        # inside it that asks. A graph with no terminal lane -- or one whose
+        # lane nobody touches -- spawns nothing.
+        sessions = TerminalSessions(graph)
+
+        def is_terminal_lane(candidate: FlowNode) -> bool:
+            return candidate.type is not None and kid.matches(candidate.type, "terminal_lane")
+
+        def terminal_access_for(node: FlowNode) -> TerminalAccess | None:
+            lane_id = sessions.lane_for(node.id, is_terminal_lane)
+            if lane_id is None:
+                return None
+            lane = next((n for n in graph.nodes if n.id == lane_id), None)
+            if lane is None:
+                return None
+            return TerminalAccess(lane_id, sessions, spec_for_lane(lane))
 
         # Deterministic topological order; also the cycle check.
         order = _topo_sort(graph)
@@ -286,12 +308,22 @@ class FlowRunner:
                     emit(RunEvent.node_status(node.id, NodeStatus.IDLE, "skipped"))
                     continue
 
-            # Notes are annotations -- never executed. Matched across every id
-            # the kind answers to: a graph saved with the canonical
-            # `@particle-academy/note` must stay an annotation, not become an
-            # unrunnable node.
-            if node.type is not None and kid.matches(node.type, "note"):
-                emit(RunEvent.node_status(node.id, NodeStatus.IDLE, "annotation"))
+            # Annotations and LAYOUT nodes never execute.
+            #
+            # This matched `note` and nothing else, so a graph containing the
+            # `@particle-academy/lane` the TypeScript runtime ships -- and walks
+            # straight past -- failed here with "No executor registered for
+            # kind=lane". Same WorkflowSchema, different answer per runtime,
+            # which is the one guarantee this package makes.
+            #
+            # `may_float` in analysis/graph_connectivity.py already knew: it
+            # names the lane explicitly as "a swimlane its engine walks straight
+            # past". The analysis knew and the runner did not, and nothing
+            # compared them. `runtime/events.py` even documents a "lane" status
+            # text that nothing had ever emitted.
+            skip = never_executes(node.type, self._registry())
+            if skip is not None:
+                emit(RunEvent.node_status(node.id, NodeStatus.IDLE, skip))
                 continue
 
             emit(RunEvent.node_status(node.id, NodeStatus.RUNNING))
@@ -308,7 +340,15 @@ class FlowRunner:
                 break
 
             _announce(emit, node, "start")
-            ctx = ExecutionContext(node, inputs, emit, options.depth, options.run, executors)
+            ctx = ExecutionContext(
+                node,
+                inputs,
+                emit,
+                options.depth,
+                options.run,
+                executors,
+                terminal_access_for(node),
+            )
             ok, payload = yield _Step(ctx, executor)
 
             if not ok:
@@ -322,6 +362,29 @@ class FlowRunner:
             # failure tells a human the opposite of what happened, in the part
             # of the UI they trust most.
             _announce(emit, node, "end")
+
+        # Close every terminal this run opened -- including when it FAILED.
+        #
+        # Yielded as steps rather than closed inline, because closing a PTY is
+        # async and the walk must stay drivable by both `run()` and `arun()`.
+        # Only `arun()` can ever reach here with a session open: opening one is
+        # itself async, and the sync driver refuses an awaitable.
+        #
+        # A leaked PTY looks like nothing at all until the machine is full of
+        # them, which is why this runs on the failure path too.
+        for lane_id in sessions.open_lanes():
+            lane_node = next((n for n in graph.nodes if n.id == lane_id), None)
+            if lane_node is None:
+                continue
+            close_ok, close_payload = yield _Step(
+                ExecutionContext(lane_node, {}, emit),
+                _closer(sessions, lane_id),
+            )
+            if not close_ok:
+                # Logged, never promoted to the run's error. Teardown happens
+                # after the outcome is decided, and letting a cleanup failure
+                # replace a real one would hide the thing worth reading.
+                emit(RunEvent.log("warn", f"terminal close failed: {close_payload}", lane_id))
 
         ok = not errors
         emit(RunEvent.run_end(ok))
@@ -376,8 +439,7 @@ class FlowRunner:
         # come from its `cases` map -- and serializes the resolved ports into
         # the document. This covers hand-written schemas that omit them.
         if declared is None and node.type is not None:
-            registry = self._kinds if self._kinds is not None else default_registry()
-            kind = registry.get(node.type)
+            kind = self._registry().get(node.type)
             kind_ports = kind.outputs if kind is not None else None
             # Only adopt NON-EMPTY kind ports. A terminal kind (category
             # "output") declares an empty list, and consuming that literally
@@ -392,6 +454,21 @@ class FlowRunner:
 
 
 # -- module-level helpers ------------------------------------------------
+
+
+def _closer(sessions: TerminalSessions, lane_id: str) -> Callable[[ExecutionContext], Any]:
+    """A teardown step for one lane.
+
+    A named function rather than a lambda with a default argument. The default
+    was there to bind ``lane_id`` per iteration -- a plain closure over the loop
+    variable would close every lane over the LAST id, and with one lane open
+    that reads as working. This binds it the same way and is readable.
+    """
+
+    def close(_ctx: ExecutionContext) -> Any:
+        return sessions.close(lane_id)
+
+    return close
 
 
 def _sync_outcome(step: _Step) -> tuple[bool, Any]:

@@ -32,8 +32,14 @@ Pure core, `src/` layout, **zero runtime dependencies**.
   active** (merge-after-decision, `#1`) and `_collect_inputs` reads only active
   edges. Don't regress either.
 - `registry/` — `NodeKindRegistry`, `NodeKind`, `ConfigField`, `kind_id`, and
-  `builtin` (the 24 authorable kinds, plus structural `note` and `subgraph`,
-  and a default executor for each one that executes -- `note` never does).
+  `builtin` (the 29 authorable kinds, plus structural `note` and `subgraph`,
+  and a default executor for each one that executes).
+  **`registry.never_executes()` is the ONE definition of what the engine walks
+  past** — `layout` and `annotation` by category, plus `note` / `lane` /
+  `terminal_lane` by id so it still holds against an empty registry. The
+  runner, `may_float` and the every-kind-has-an-executor test all read it;
+  any two of them disagreeing would produce either an unrunnable node or a
+  spurious missing-executor failure, and both look like something else.
 - `executors.py` — `ExecutorRegistry`; resolves node id → kind → `*`.
 - `runtime/` — `RunEvent`, `RunOptions`, `RunResult`, `ExecutionContext`,
   `Port`, `Pause`, `AbortSignal`, `RunIdentity`.
@@ -50,7 +56,9 @@ Pure core, `src/` layout, **zero runtime dependencies**.
 - `nodes/` — the default executors by domain, plus `nodes/support/` (injectable
   client protocols, offline fakes, the `{{ }}` resolver, structured output).
 - `capabilities/` — the HOST seam: `LlmClient` (`choose_route`, used by
-  `llm_router`) and `WorkflowResolver` (used by `subflow`).
+  `llm_router`), `WorkflowResolver` (used by `subflow`), and `TerminalHost`
+  (used by terminal lanes). The core spawns no PTY for the same reason it
+  imports no model SDK.
 - `durable/` — resumable runs with **no queue library**: the claim contract, the
   frontier, per-node replay, retry policy, human gates, and the coordinator.
 - `security/policy.py` — `GraphPolicy`, for a graph that arrived over the wire.
@@ -122,6 +130,35 @@ bare name only never matched a node saved as `@particle-academy/user_input`, so
 the run went straight past the person it was meant to stop for, and nothing
 errored.
 
+## Terminal lanes
+
+A `terminal_lane` owns one terminal for a whole run; `terminal_run` /
+`terminal_send` / `terminal_await` go inside it. **They are async, so they only
+work through `arun()`.**
+
+Three properties, all about WHEN, and each fails silently:
+
+1. **One terminal per lane.** Two shells look like one that forgot a `cd`.
+2. **Opened at the first node that uses it**, not at run start.
+3. **Closed when the run ends, including when it FAILS.** A leaked PTY looks
+   like nothing at all until the machine is full of them.
+
+`runtime/terminal.py` holds the matching, and every line of it is there for a
+hazard that is intermittent in production and invisible in a tidy test: chunks
+are arbitrary (match an accumulated buffer, never a chunk); escapes straddle
+chunks (hold back an incomplete trailing sequence rather than stripping it into
+the text); output arrives before anyone is listening (attach the transcript
+when the SESSION opens). A match is consumed so a loop cannot read one old line
+forever.
+
+**One exit watcher per session, shared by every wait, and a wait never cancels
+it.** A wait that cancelled it on the way out would disarm exit-detection for
+every wait after it — so a dead shell would be named correctly by the first
+node and reported as a timeout by every one after, which is worse than never
+naming it because the first report teaches you to trust the second.
+
+`fancy-flow-php` is excluded by design: it needs desktop execution.
+
 ## Deliberate divergences
 
 Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
@@ -186,10 +223,14 @@ discovery when the checkouts are somewhere unusual.
 
 ## Status
 
-**0.1.0 — core parity, unreleased.** The engine, the registries, the 24 built-in
-kinds plus structural `note` / `subgraph` and their executors, `{{ }}`,
-capabilities, the node manifest, `GraphPolicy`, and the durable core (claims /
-frontier / replay / retries / human gates / coordinator) are built and tested.
+**Released; see `CHANGELOG.md` for the current line.** This section said
+"0.1.0 — core parity, unreleased" through sixteen minor releases, so read the
+changelog rather than this paragraph for what has shipped.
+
+The engine, the registries, the 29 built-in kinds plus structural `note` /
+`subgraph` and their executors, `{{ }}`, capabilities, the node manifest,
+`GraphPolicy`, terminal lanes, and the durable core (claims / frontier / replay
+/ retries / human gates / coordinator) are built and tested.
 
 **Not built, and staged in the plan:** queue adapters (Celery, Dramatiq, Taskiq,
 Procrastinate), a persistent `NodeClaimStore`, a web-framework integration, the

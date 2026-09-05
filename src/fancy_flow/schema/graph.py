@@ -83,6 +83,30 @@ class FlowNode:
     config: dict[str, Any] = field(default_factory=dict)
     inputs: tuple[PortDescriptor, ...] | None = None
     outputs: tuple[PortDescriptor, ...] | None = None
+    #: The node this one sits INSIDE — a swimlane or other container.
+    #:
+    #: Not decoration. The WorkflowSchema comment used to say these visual
+    #: fields exist "purely for the canvas", so a runtime that only walks edges
+    #: and ports could ignore them, and this runtime did: ``parent_id`` was
+    #: neither imported nor exported, so a graph read here and written back lost
+    #: every grouping a person had drawn, silently and completely.
+    #:
+    #: Terminal lanes make it load-bearing for EXECUTION as well — which
+    #: terminal a node talks to is decided by which lane contains it, and there
+    #: is deliberately no second copy of that fact in each node's config to
+    #: drift from the canvas.
+    parent_id: str | None = None
+    #: ``"parent"``, or ``[[x1, y1], [x2, y2]]`` bounds. Carried WITH
+    #: ``parent_id`` rather than separately: a container whose child has lost
+    #: its containment rule is a half-restored graph, which is harder to notice
+    #: than one that plainly lost the grouping.
+    extent: Any = None
+    #: An explicit (resized) size, and inline presentation. Round-tripped for
+    #: the same reason: a tool that reads a graph here and writes it back must
+    #: not flatten a canvas somebody laid out.
+    width: float | None = None
+    height: float | None = None
+    style: dict[str, Any] | None = None
 
     @property
     def kind(self) -> str | None:

@@ -11,9 +11,58 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import kind_id as kid
 from .node_kind import ConfigField, NodeKind
 
-__all__ = ["NodeKindRegistry", "category_accent", "default_registry", "reset_default_registry"]
+__all__ = [
+    "NodeKindRegistry",
+    "category_accent",
+    "default_registry",
+    "never_executes",
+    "reset_default_registry",
+]
+
+
+def never_executes(kind_id: str | None, registry: NodeKindRegistry | None = None) -> str | None:
+    """The status text for a kind the engine walks past, or ``None`` to run it.
+
+    ONE definition, because three places need this answer and any two of them
+    disagreeing is a defect nobody would see: the runner decides what to skip,
+    ``may_float`` decides what may sit unconnected, and the registry test that
+    forces every kind to have an executor decides what is exempt from needing
+    one. A kind that is skippable in one and not the others is either an
+    unrunnable node or a missing-executor failure, and both look like something
+    else.
+
+    The kinds this package SHIPS are matched by id as well as by category,
+    because ``builtin.register()`` is opt-in: a caller who took
+    ``builtin.executors()`` and never installed the kinds has an empty registry,
+    and a category lookup would then answer "unknown" for a lane the engine
+    plainly ships.
+
+    An UNKNOWN kind returns ``None`` -- running is the default, and a kind
+    nobody registered still needs an executor. ``may_float`` deliberately
+    differs there, and only there: it lets an unknown kind float because it
+    cannot know what the kind is, which is the honest answer to a different
+    question.
+    """
+    if not kind_id:
+        return None
+
+    if kid.matches(kind_id, "note"):
+        return "annotation"
+
+    if kid.matches(kind_id, "lane") or kid.matches(kind_id, "terminal_lane"):
+        return "lane"
+
+    kind = (registry or default_registry()).get(kind_id)
+    if kind is None:
+        return None
+    if kind.category == "annotation":
+        return "annotation"
+    if kind.category == "layout":
+        return "lane"
+    return None
 
 
 class NodeKindRegistry:

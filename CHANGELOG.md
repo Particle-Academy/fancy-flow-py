@@ -6,6 +6,87 @@ All notable changes to `fancy-flow` (Python) are documented here, in
 This package is pre-1.0, so **breaking changes land in MINOR releases**. The
 version number is not a promise it can yet keep; the entries are.
 
+## [Unreleased]
+
+### Added
+
+- **Terminal lanes — drive a running terminal, including an agent TUI, from a
+  workflow.** A `terminal_lane` owns ONE terminal for the length of a run: it
+  opens when the first node inside it actually uses it, every node in the lane
+  gets the same session (so `cd` persists and a TUI keeps its conversation),
+  and it closes when the run finishes — **including when the run fails**.
+  Membership is `parentId`, so a headless runtime resolves exactly the grouping
+  a person drew on the canvas.
+
+  Three nodes go inside one:
+
+  - `terminal_run` — run a shell command and wait for its real **exit code**.
+    Non-zero fails the run by default; set `failOnNonZero: false` to branch on
+    the code instead.
+  - `terminal_send` — type at whatever is running, without waiting. Presses
+    Enter as a carriage return, which is what readline and Ink listen for.
+  - `terminal_await` — wait until the output matches, with capture groups in
+    regex mode.
+
+  Matching runs against ACCUMULATED output with escape sequences stripped, so a
+  pattern split across PTY chunks still resolves and you match what you see.
+  Output that arrived before an await started is not lost. A match is consumed,
+  so the same pattern does not resolve twice on one line. Matched, timed out
+  and *the process exited* are three distinct outcomes — folding the last two
+  is how a dead shell gets reported as "timed out waiting for X".
+
+  **These are async, so they need `FlowRunner.arun()`.** Waiting on a process
+  is not something a synchronous runner can do; `run()` already says so by
+  name when it meets an awaitable.
+
+  The PTY is a host capability (`capabilities.set_terminal_host`), so the core
+  keeps its zero runtime dependencies. There is deliberately no
+  `wait_for(pattern)` in the contract: matching is derivable from `on_data`,
+  and putting it there would mean every host implementing the same rule twice.
+
+  `fancy-flow-php` is excluded from this feature by design — it needs desktop
+  execution.
+
+- **`capabilities.status()` reports `terminal`.** A graph with a terminal lane
+  and no host fails part-way through a run, which is precisely what asking up
+  front is for.
+
+### Fixed
+
+- **`parentId` survives import and export.** It was neither read nor written,
+  so a graph loaded here and saved back lost every grouping a person had drawn
+  — silently and completely. `extent`, `width`, `height` and `style` are
+  carried with it: half a restoration (a child that kept its parent but lost
+  its containment rule, a lane back at the default size) reads as a canvas
+  somebody nudged rather than as data a tool destroyed.
+
+  The WorkflowSchema's own comment invited this, saying these fields exist
+  "purely for the canvas" so "a runtime that only walks edges and ports ignores
+  all of these". That was true when they were decoration. Terminal lanes make
+  `parentId` load-bearing for EXECUTION, and the comment has been corrected on
+  the TypeScript side.
+
+  **Nothing to do** unless you round-trip graphs, in which case grouping now
+  survives where it previously did not.
+
+- **A graph containing a `lane` runs.** The TypeScript engine ships
+  `@particle-academy/lane` and walks straight past it; this runtime had no lane
+  kind and skipped only `note`, so the same WorkflowSchema failed here with
+  `No executor registered for kind=lane` — breaking the one guarantee this
+  package makes.
+
+  The runner now skips by CATEGORY (`layout` / `annotation`) the way the
+  TypeScript engine does, so a host's own swimlane needs no executor either.
+  `lane` and `terminal_lane` are also matched by id, because `builtin.register()`
+  is opt-in and a category lookup answers "unknown" against an empty registry.
+
+  `analysis/graph_connectivity.py` already knew — `may_float` names the lane
+  explicitly as "a swimlane its engine walks straight past". The analysis knew
+  and the runner did not, and nothing compared them; `runtime/events.py` even
+  documented a `"lane"` status text nothing had ever emitted. The rule now has
+  **one definition** (`registry.never_executes`) that the runner, `may_float`
+  and the every-kind-has-an-executor test all read.
+
 ## [0.17.0] - 2026-09-03
 
 ### Fixed

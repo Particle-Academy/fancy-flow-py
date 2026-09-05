@@ -368,7 +368,11 @@ def test_subgraph_runs_a_nested_workflow_and_returns_its_outputs() -> None:
 def test_status_reports_what_a_graph_would_be_missing() -> None:
     """So a host -- or an agent over MCP -- can answer "what have I not wired?"
     BEFORE a run fails halfway through."""
-    assert capabilities.status() == {"llm": False, "workflow_resolver": False}
+    assert capabilities.status() == {
+        "llm": False,
+        "workflow_resolver": False,
+        "terminal": False,
+    }
     capabilities.set_llm_client(object())  # type: ignore[arg-type]
     assert capabilities.status()["llm"] is True
 
