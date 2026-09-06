@@ -8,6 +8,8 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-05
+
 ### Added
 
 - **Terminal lanes — drive a running terminal, including an agent TUI, from a
