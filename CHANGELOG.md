@@ -8,6 +8,59 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-12
+
+### Added
+
+- **`load_installed_kinds()` — a declared way for a node package to say it
+  exists.** Python had no discovery convention, and the absence was already
+  being filled: a connector lab found node packages by scanning
+  `pkgutil.iter_modules()` for `fancy_*` and guessing at a `.flow` submodule.
+  That is a reasonable thing to write when the engine offers nothing, and it
+  puts the convention in the HOST — where the next host writes a different one.
+  Twenty-three packages were about to ship against it.
+
+  A package now declares itself:
+
+  ```toml
+  [project.entry-points."fancy_flow.nodes"]
+  stripe = "fancy_stripe.flow"
+  ```
+
+  ```python
+  def register(kinds: NodeKindRegistry, executors: ExecutorRegistry) -> None:
+      for kind in RUNNABLE_KINDS:
+          kinds.register(kind)
+      for name, fn in EXECUTORS.items():
+          executors.bind(name, fn)
+  ```
+
+  and a host calls `load_installed_kinds(kinds, executors)`.
+
+  **One function registering both is the point, not a convenience.** It removes
+  the state where a kind reaches the editor with nothing behind it to run —
+  authorable, draggable and dead at run time. Two hooks make that reachable by
+  forgetting one; a single seam does not. It is what `#[FlowNode]` discovery
+  already gives the PHP twin, reached differently because Python has no
+  attribute worth leaning on here.
+
+  Register kinds BEFORE binding executors. `ExecutorRegistry.bind` is
+  alias-aware only for kinds its registry already knows, so binding first skips
+  the alias fan-out and a node saved under its canonical
+  `@particle-academy/...` id stops matching a binding made under the bare name.
+  That exact ordering bug once walked a run straight past a human approval gate
+  in the PHP twin.
+
+  **A broken package is reported, never skipped.** `DiscoveryResult` carries
+  `loaded` and `failed` — a pass that caught `ImportError` and continued would
+  turn "this connector is broken" into "this connector is absent", and absent
+  reads as fine. `strict=True` raises instead, for a host that would rather not
+  boot than boot half-wired.
+
+  Exported from the package root as `load_installed_kinds`, `DiscoveryResult`
+  and `ENTRY_POINT_GROUP`. Nothing existing changes: a host that does not call
+  it behaves exactly as before.
+
 ## [0.18.0] - 2026-09-05
 
 ### Added

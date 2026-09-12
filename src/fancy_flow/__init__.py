@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from . import capabilities
 from .contracts import NativeResolver, NodeExecutor, Resolver, TriggerGuard
+from .discovery import ENTRY_POINT_GROUP, DiscoveryResult, load_installed_kinds
 from .engine.runner import FlowRunner
 from .exceptions import FlowError, RunAborted, UnsafeGraph
 from .executors import ExecutorRegistry
@@ -89,11 +90,13 @@ def _installed_version() -> str:
 __version__ = _installed_version()
 
 __all__ = [
+    "ENTRY_POINT_GROUP",
     "SCHEMA_URL",
     "SCHEMA_VERSION",
     "AbortController",
     "AbortSignal",
     "ConfigField",
+    "DiscoveryResult",
     "ExecutionContext",
     "ExecutorRegistry",
     "FlowEdge",
@@ -126,6 +129,7 @@ __all__ = [
     "default_registry",
     "export_workflow",
     "import_workflow",
+    "load_installed_kinds",
     "migrate_schema",
     "reset_default_registry",
     "to_json",
