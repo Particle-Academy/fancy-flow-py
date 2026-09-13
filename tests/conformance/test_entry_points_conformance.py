@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fancy_flow import FlowRunner, NodeKindRegistry, RunOptions, builtin, import_workflow
+from fancy_conformance import format_summary, run_table
 
-from .loader import format_summary, run_table
+from fancy_flow import FlowRunner, NodeKindRegistry, RunOptions, builtin, import_workflow
 
 SUITE = "flow/entry-points"
 

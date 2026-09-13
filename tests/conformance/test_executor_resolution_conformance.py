@@ -43,13 +43,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from fancy_conformance import format_summary, run_table
+
 from fancy_flow.executors import ExecutorRegistry
 from fancy_flow.registry.node_kind import NodeKind
 from fancy_flow.registry.registry import NodeKindRegistry
 from fancy_flow.runtime.context import ExecutionContext
 from fancy_flow.schema.graph import FlowNode
-
-from .loader import format_summary, run_table
 
 SUITE = "flow/executor-resolution"
 

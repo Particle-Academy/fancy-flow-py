@@ -2,10 +2,11 @@
 
 Rule 4 of fancy-conformance's ``runners/README.md``: print AND assert the pinned
 suite version. Every suite in this directory prints the version it ran against,
-but until this file nothing asserted it against a pin -- each file compared
-``summary["version"]`` with ``version()``, which is the same number read twice.
-"We are on an old fixture set" should be visible in the log, and a fixture set
-moving underneath the port should fail here rather than be inferred later.
+but until this file nothing asserted it against a pin -- each file compared the
+summary's version (``summary["suiteVersion"]``) with ``version()``, which is the
+same number read twice. "We are on an old fixture set" should be visible in the
+log, and a fixture set moving underneath the port should fail here rather than be
+inferred later.
 """
 
 from __future__ import annotations
@@ -14,8 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
-
-from .loader import version
+from fancy_conformance import version
 
 # Pinned at 0.22.0 on 2026-09-13, after re-running every table in this directory
 # against a v0.22.0 checkout: flow/entry-points 7, flow/executor-resolution 8

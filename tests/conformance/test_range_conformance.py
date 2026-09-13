@@ -16,10 +16,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fancy_conformance import cases, format_summary, run_table, version
 
 from fancy_flow.marketplace import satisfies_range
-
-from .loader import cases, format_summary, run_table, version
 
 SUITE = "shared/satisfies-range"
 
@@ -42,7 +41,7 @@ def test_matches_every_row(capsys: pytest.CaptureFixture[str]) -> None:
     failures = [r["id"] for r in summary["results"] if r["status"] == "fail"]
     assert not failures, "Python disagrees with the shared table on: " + ", ".join(failures)
     assert summary["passed"] > 15
-    assert summary["version"] == version()
+    assert summary["suiteVersion"] == version()
 
 
 def test_pre_1_0_caret_locks_the_minor() -> None:

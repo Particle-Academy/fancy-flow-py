@@ -25,10 +25,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fancy_conformance import cases, format_summary, run_table, version
 
 from fancy_flow.runtime import RunIdentity
-
-from .loader import cases, format_summary, run_table, version
 
 SUITE = "shared/flow-run-identity"
 
@@ -75,7 +74,7 @@ def test_matches_every_row(capsys: pytest.CaptureFixture[str]) -> None:
     assert not failures, "Python disagrees with the shared table on: " + ", ".join(failures)
     assert summary["failed"] == 0
     assert summary["passed"] > 20
-    assert summary["version"] == version()
+    assert summary["suiteVersion"] == version()
 
 
 def test_attempt_is_not_in_the_key() -> None:

@@ -75,6 +75,18 @@ include = ["/src", "/tests", "/README.md", "/CHANGELOG.md", "/AGENTS.md", "/LICE
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The shared fixture loader, from the fancy-conformance checkout beside this
+# repository in the .agi envelope. It is not on PyPI, so it is on the path
+# rather than in the `test` group -- a group entry would send `pip install
+# --group dev` to PyPI for a name that is not there. CI checks the tag out at
+# .conformance and sets PYTHONPATH to its python/src instead.
+#
+# This replaces the private tests/conformance/loader.py this repository carried:
+# fancy-conformance's AGENTS.md asks each consumer to delete its copy when next
+# touched, because two of the four copies read a case's `skip` as a scalar.
+# Only the shared loader's src is added; the working tree's own src stays off
+# the path, as the importlib note below requires.
+pythonpath = ["../fancy-conformance/python/src"]
 # importlib mode pairs with src-layout: the working tree is never on sys.path,
 # so the tests exercise the INSTALLED package. Under the default mode a missing
 # py.typed or an unshipped file passes locally and breaks for every user.

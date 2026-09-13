@@ -88,8 +88,14 @@ jobs:
       - name: Type check
         run: mypy
 
+      # pyproject's pytest `pythonpath` finds the shared `fancy_conformance`
+      # loader at ../fancy-conformance/python/src, which is where it sits in the
+      # .agi envelope. Here the checkout is INSIDE the workspace, so PYTHONPATH
+      # points at the one this job made -- at the pinned tag. last-word-py ran red
+      # for three weeks on exactly this path mismatch.
       - name: Test
         env:
           FANCY_CONFORMANCE_ROOT: ${{ github.workspace }}/.conformance
+          PYTHONPATH: ${{ github.workspace }}/.conformance/python/src
           FANCY_FLOW_PHP_FIXTURES: ${{ github.workspace }}/.fancy-flow-php/tests/Parity/fixtures
         run: pytest -ra

@@ -17,9 +17,9 @@ implementation is wrong -- read the executor before touching the fixture.
 
 from typing import Any
 
-from fancy_flow.registry import builtin
+from fancy_conformance import format_summary, run_table
 
-from .loader import format_summary, run_table
+from fancy_flow.registry import builtin
 
 SUITE = "flow/kind-declaration-surface"
 

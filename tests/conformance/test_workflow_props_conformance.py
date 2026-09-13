@@ -33,10 +33,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fancy_conformance import cases, format_summary, run_table
 
 from fancy_flow.runtime.workflow_props import resolve_workflow_props
-
-from .loader import cases, format_summary, run_table
 
 SUITE = "flow/workflow-props"
 

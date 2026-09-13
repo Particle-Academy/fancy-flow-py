@@ -18,10 +18,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fancy_conformance import cases, format_summary, run_table, version
 
 from fancy_flow.nodes.support import expr
-
-from .loader import cases, format_summary, run_table, version
 
 SUITE = "shared/expr"
 
@@ -60,7 +59,7 @@ def test_matches_every_row(capsys: pytest.CaptureFixture[str]) -> None:
     assert summary["failed"] == 0
     # A suite that skipped everything would report zero failures too.
     assert summary["passed"] > 15
-    assert summary["version"] == version()
+    assert summary["suiteVersion"] == version()
 
 
 def test_disagrees_with_native_truthiness_where_the_table_says_it_should() -> None:

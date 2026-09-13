@@ -187,7 +187,9 @@ Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
 ## Parity is a test result, not a claim
 
 - `tests/conformance/` runs `shared/expr` **and** `shared/satisfies-range` from
-  `particle-academy/fancy-conformance` through `tests/conformance/loader.py`.
+  `particle-academy/fancy-conformance` through that package's own Python loader,
+  `fancy_conformance` (on pytest's `pythonpath` from the envelope checkout; CI
+  sets `PYTHONPATH` to its tag checkout).
   A missing conformance checkout is a **failure**, never a skip.
   `tests/conformance/test_pinned_suite_version.py` pins the fixture set, and CI
   checks out exactly that tag; a test fails if the pin and the workflow's `ref`
@@ -202,9 +204,13 @@ Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
   per-node durable driver too** and requires the same answer. That is what pins
   "what is unblocked?" against "what is next?".
 
-`tests/conformance/loader.py` is a **third loader for a package that ships two**.
-It belongs in `fancy-conformance`; until it lands there, treat this file as a
-bridge and keep it behaviourally identical to the Node and PHP loaders.
+There is **no private loader here**, and there must not be one again.
+`tests/conformance/loader.py` was a bridge until `fancy-conformance` shipped its
+own Python loader, and it was deleted on 2026-09-13: four consumers had each
+written one and two of those copies read a case's `skip` as a scalar, so a row
+skipped for PHP skipped on Python too while the log read green. A loader bug is
+fixed once, in `fancy-conformance`. Note the shared summary reports the fixture
+version as `suiteVersion`, the key the Node and PHP loaders use.
 
 ## Conventions
 
