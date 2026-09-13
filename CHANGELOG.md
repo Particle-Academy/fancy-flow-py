@@ -8,6 +8,45 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-13
+
+### Changed
+
+- **BREAKING: `lenient` no longer softens the schema version.** A lenient
+  import used to turn `Unsupported workflow schema version` into a warning and
+  carry on, in all three runtimes. fancy-flow-php imports leniently on every
+  `run()`, so a document with no `version` ran there while a default import
+  here or in TypeScript, both strict, refused it: one document, two answers,
+  recorded by the fancy-conformance `flow/connector-runs` manifest.
+
+  `lenient` exists for unknown vocabulary, a kind this host has not
+  registered. A version is the format itself, and a runtime cannot honour a
+  format it does not know. After migration of older numbered versions,
+  `version` must now be `1` in every mode, and a refused import returns
+  `ok=False` with an empty graph. The same rule now holds in all three
+  runtimes.
+
+  Two comparisons tightened on the way, so the three agree on every value:
+  `True` is no longer read as version 1 (`True == 1` in Python, and the old
+  `!=` check let it through), and `1.0` still is, because JavaScript cannot
+  tell it from `1`.
+
+  **What to do:** a document without `version: 1` is now refused by every
+  import, lenient or not; documents exported by fancy-flow always carry it, so
+  re-export or add `version: 1`. If you run `import_workflow(...).graph`
+  without looking at the result, check the new `result.refused` first: a
+  refused import's empty graph runs and reports success.
+
+### Added
+
+- **`ImportResult.refused`**: whether the importer refused the document
+  outright (empty graph) rather than reading it and finding errors. A graph
+  that was read but carries a connectivity error is `ok=False` and NOT
+  refused, and still runs as it always has.
+- **`UnreadableWorkflow`** (a `FlowError`), raised by the `subgraph` executor
+  when its nested graph is refused, so that node fails with the import's
+  errors instead of running nothing and passing.
+
 ## [0.19.0] - 2026-09-12
 
 ### Added

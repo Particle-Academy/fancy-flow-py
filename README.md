@@ -30,6 +30,12 @@ run.outputs  # {node_id: value}
 run.error  # str | None
 ```
 
+`import_workflow(..., lenient=True)` softens an unknown kind to a warning. It
+never softens the schema version: a document without `version: 1` is refused in
+every mode, with an empty graph and `result.refused` true, exactly as the
+TypeScript and PHP runtimes refuse it. Check `result.refused` before running,
+or an empty graph runs and reports success.
+
 ## Async, without two engines
 
 Executors may be synchronous or `async`. The graph walk is written once and

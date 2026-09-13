@@ -11,6 +11,7 @@ from typing import Any
 
 from .. import capabilities as caps
 from ..engine.runner import FlowRunner
+from ..exceptions import UnreadableWorkflow
 from ..executors import ExecutorRegistry
 from ..registry.registry import NodeKindRegistry
 from ..runtime.context import ExecutionContext
@@ -52,6 +53,10 @@ class Subgraph:
 
         registry = register_builtins(NodeKindRegistry(), with_structural=True)
         result = import_workflow(graph, lenient=True, registry=registry)
+        # A nested graph that cannot be read fails THIS node. Running the empty
+        # graph a refused import returns would pass the node with nothing done.
+        if result.refused:
+            raise UnreadableWorkflow(result.errors())
 
         run = FlowRunner().run(
             result.graph,

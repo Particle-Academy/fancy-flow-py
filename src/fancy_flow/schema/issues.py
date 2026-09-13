@@ -50,8 +50,9 @@ class ImportIssue:
 class ImportResult:
     """A hydrated graph plus the issues found.
 
-    ``ok`` is true when no error-level issue was recorded. In lenient mode
-    errors are downgraded to warnings, so ``ok`` stays true.
+    ``ok`` is true when no error-level issue was recorded. Lenient mode
+    downgrades an unknown kind to a warning, but never an unsupported schema
+    version, which always fails with an empty graph.
     """
 
     ok: bool
@@ -63,3 +64,15 @@ class ImportResult:
 
     def warnings(self) -> list[ImportIssue]:
         return [i for i in self.issues if not i.is_error]
+
+    @property
+    def refused(self) -> bool:
+        """Whether the importer refused the DOCUMENT, rather than reading it and finding problems.
+
+        A refusal (not an object, or not ``version: 1``) is ``ok`` false with
+        an EMPTY graph: nothing was read. An import that read the graph and
+        found an error (a connectivity error, say) returns that graph alongside
+        ``ok`` false. Code that goes on to RUN an import must refuse the first,
+        or it runs nothing and reports success.
+        """
+        return not self.ok and not self.graph.nodes and not self.graph.edges

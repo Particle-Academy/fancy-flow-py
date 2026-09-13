@@ -25,7 +25,7 @@ from . import capabilities
 from .contracts import NativeResolver, NodeExecutor, Resolver, TriggerGuard
 from .discovery import ENTRY_POINT_GROUP, DiscoveryResult, load_installed_kinds
 from .engine.runner import FlowRunner
-from .exceptions import FlowError, RunAborted, UnsafeGraph
+from .exceptions import FlowError, RunAborted, UnreadableWorkflow, UnsafeGraph
 from .executors import ExecutorRegistry
 from .registry import builtin
 from .registry.node_kind import ConfigField, NodeKind
@@ -121,6 +121,7 @@ __all__ = [
     "RunOptions",
     "RunResult",
     "TriggerGuard",
+    "UnreadableWorkflow",
     "UnsafeGraph",
     "WorkflowMetadata",
     "__version__",

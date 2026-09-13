@@ -103,8 +103,13 @@ def import_workflow(
     """Hydrate a WorkflowSchema into a :class:`FlowGraph`.
 
     Validates kinds and configs against the registry, reporting unknown kinds,
-    missing required config, and dangling edges. In lenient mode, schema-level
-    errors become warnings.
+    missing required config, and dangling edges. In lenient mode an unknown kind
+    becomes a warning.
+
+    The schema version is NEVER softened: a document that is not ``version: 1``
+    after migration is refused in every mode, with an empty graph (see
+    :attr:`ImportResult.refused`). A runtime cannot honour a format it does not
+    know, and one document must not run in one engine and be refused by another.
     """
     registry = registry if registry is not None else default_registry()
     issues: list[ImportIssue] = []
@@ -126,15 +131,22 @@ def import_workflow(
     schema = migrate_schema(schema)
     version = schema.get("version")
 
-    if version != SCHEMA_VERSION:
+    # NEVER softened by `lenient`. That flag is about unknown VOCABULARY (a kind
+    # this host has not registered); a version is the format itself, and a
+    # runtime cannot honour a format it does not know. It used to become a
+    # warning, and fancy-flow-php imports leniently on every run(), so one
+    # versionless document ran there and was refused by a default (strict)
+    # import here and in the TypeScript runtime.
+    #
+    # `1.0` is accepted, as JavaScript cannot tell it from `1`. A bool is not a
+    # version, although `True == 1` here: a bare `!=` let it through.
+    if not _is_current_version(version):
         issues.append(
-            ImportIssue(
-                WARNING if lenient else ERROR,
-                f"Unsupported workflow schema version: {version!r} (expected {SCHEMA_VERSION})",
+            ImportIssue.error(
+                f"Unsupported workflow schema version: {version!r} (expected {SCHEMA_VERSION})"
             )
         )
-        if not lenient:
-            return ImportResult(False, FlowGraph(), tuple(issues))
+        return ImportResult(False, FlowGraph(), tuple(issues))
 
     graph_raw = schema.get("graph") or {}
     raw_nodes = graph_raw.get("nodes") or []
@@ -314,6 +326,15 @@ def to_json(
 ) -> str:
     """Export and JSON-encode in one step."""
     return json.dumps(export_workflow(graph, metadata, view), indent=indent, ensure_ascii=False)
+
+
+def _is_current_version(version: Any) -> bool:
+    """A number equal to the current schema version, and not a bool."""
+    return (
+        isinstance(version, int | float)
+        and not isinstance(version, bool)
+        and version == SCHEMA_VERSION
+    )
 
 
 def _opt(value: Any) -> str | None:

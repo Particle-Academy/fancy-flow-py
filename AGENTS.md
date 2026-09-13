@@ -26,7 +26,14 @@ as of 0.1.0, and all three are listed under "Deliberate divergences" below.
 
 Pure core, `src/` layout, **zero runtime dependencies**.
 
-- `workflow.py` — import / export / validate WorkflowSchema v1.
+- `workflow.py` — import / export / validate WorkflowSchema v1. **`lenient`
+  softens vocabulary (an unknown kind), never the schema version:** a document
+  that is not `version: 1` after migration is refused in every mode with an
+  empty graph, as the TS and PHP importers refuse it. `True` is not a version
+  even though `True == 1`, and `1.0` is, because JavaScript cannot tell it from
+  `1`. Anything that imports in order to RUN checks `ImportResult.refused`
+  (the `subgraph` executor raises `UnreadableWorkflow`), not `ok`: a graph that
+  was read but carries a connectivity error has always run.
 - `engine/runner.py` — `FlowRunner`, the `runFlow` port. Kahn topo, ports,
   branching, cycles, timeout, resume. **A node runs when ≥1 incoming edge is
   active** (merge-after-decision, `#1`) and `_collect_inputs` reads only active

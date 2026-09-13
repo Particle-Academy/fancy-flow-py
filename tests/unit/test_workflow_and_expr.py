@@ -30,16 +30,16 @@ def registry() -> NodeKindRegistry:
 # -- import --------------------------------------------------------------
 
 
-def test_a_wrong_schema_version_is_an_error_and_lenient_downgrades_it() -> None:
+def test_a_wrong_schema_version_is_an_error_in_every_mode() -> None:
+    # Lenient used to downgrade this to a warning. It no longer does; see
+    # test_import_refuses_unsupported_version.py for why.
     doc = {"version": 99, "graph": {"nodes": [], "edges": []}}
 
-    strict = import_workflow(doc, registry=registry())
-    assert strict.ok is False
-    assert strict.graph.nodes == ()
-
-    lenient = import_workflow(doc, lenient=True, registry=registry())
-    assert lenient.ok is True
-    assert lenient.warnings() != []
+    for lenient in (False, True):
+        result = import_workflow(doc, lenient=lenient, registry=registry())
+        assert result.ok is False
+        assert result.graph.nodes == ()
+        assert result.warnings() == []
 
 
 def test_a_json_string_is_accepted() -> None:
