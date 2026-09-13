@@ -186,8 +186,10 @@ Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
 
 ## Parity is a test result, not a claim
 
-- `tests/conformance/` runs `shared/expr` **and** `shared/satisfies-range` from
-  `particle-academy/fancy-conformance` through that package's own Python loader,
+- `tests/conformance/` runs seven tables from `particle-academy/fancy-conformance`:
+  `shared/expr`, `shared/satisfies-range`, `shared/flow-run-identity`,
+  `flow/entry-points`, `flow/executor-resolution`, `flow/kind-declaration-surface`
+  and `flow/workflow-props`, through that package's own Python loader,
   `fancy_conformance` (on pytest's `pythonpath` from the envelope checkout; CI
   sets `PYTHONPATH` to its tag checkout).
   A missing conformance checkout is a **failure**, never a skip.
