@@ -189,6 +189,9 @@ Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
 - `tests/conformance/` runs `shared/expr` **and** `shared/satisfies-range` from
   `particle-academy/fancy-conformance` through `tests/conformance/loader.py`.
   A missing conformance checkout is a **failure**, never a skip.
+  `tests/conformance/test_pinned_suite_version.py` pins the fixture set, and CI
+  checks out exactly that tag; a test fails if the pin and the workflow's `ref`
+  disagree, so the two move together in one deliberate commit.
 - `tests/parity/test_graph_fixtures.py` runs the 23 golden `WorkflowSchema`
   fixtures. Read `tests/parity/fixtures/SOURCE.md` before touching them: they
   are a COPY of the PHP twin's, because those goldens are not in the shared
