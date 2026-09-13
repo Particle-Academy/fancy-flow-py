@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fancy_conformance import format_summary, run_table
 
 from fancy_flow import FlowRunner, NodeKindRegistry, RunOptions, builtin, import_workflow
@@ -51,10 +52,14 @@ def _run_case(case: dict[str, Any]) -> list[str]:
     return sorted(result.outputs.keys())
 
 
-def test_matches_the_entry_points_table() -> None:
+def test_matches_the_entry_points_table(capsys: pytest.CaptureFixture[str]) -> None:
     summary = run_table(SUITE, _run_case)
 
-    print("\n" + format_summary(summary))
+    # capsys.disabled(): pytest captures a passing test's stdout, so a bare
+    # print() never reached the CI log -- the summary, and every skip reason
+    # in it, was swallowed on exactly the green runs it exists to explain.
+    with capsys.disabled():
+        print("\n" + format_summary(summary))
 
     failures = [r for r in summary["results"] if r["status"] == "fail"]
     assert not failures, "Python disagrees with the shared table on: " + ", ".join(

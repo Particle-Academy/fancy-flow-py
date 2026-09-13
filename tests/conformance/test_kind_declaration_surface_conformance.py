@@ -17,6 +17,7 @@ implementation is wrong -- read the executor before touching the fixture.
 
 from typing import Any
 
+import pytest
 from fancy_conformance import format_summary, run_table
 
 from fancy_flow.registry import builtin
@@ -49,10 +50,14 @@ def _run_case(case: dict[str, Any]) -> dict[str, Any]:
     return {"outputShape": output_shape, "emits": kind.emits_for(config)}
 
 
-def test_matches_the_kind_declaration_surface_table() -> None:
+def test_matches_the_kind_declaration_surface_table(capsys: pytest.CaptureFixture[str]) -> None:
     summary = run_table(SUITE, _run_case)
 
-    print("\n" + format_summary(summary))
+    # capsys.disabled(): pytest captures a passing test's stdout, so a bare
+    # print() never reached the CI log -- the summary, and every skip reason
+    # in it, was swallowed on exactly the green runs it exists to explain.
+    with capsys.disabled():
+        print("\n" + format_summary(summary))
 
     failures = [r for r in summary["results"] if r["status"] == "fail"]
     assert not failures, "Python disagrees with the shared table on: " + ", ".join(

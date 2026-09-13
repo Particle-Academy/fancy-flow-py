@@ -43,6 +43,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fancy_conformance import format_summary, run_table
 
 from fancy_flow.executors import ExecutorRegistry
@@ -100,13 +101,17 @@ def _run_case(case: dict[str, Any]) -> str | None:
     return resolved(ExecutionContext(node=node, inputs={}, emit=lambda _event: None))
 
 
-def test_matches_the_executor_resolution_table() -> None:
+def test_matches_the_executor_resolution_table(capsys: pytest.CaptureFixture[str]) -> None:
     summary = run_table(SUITE, _run_case)
 
     # Printed unconditionally, so a green build still shows WHAT was compared —
     # including which rows were skipped and why. A bare "6 skipped" reads
     # identically to full coverage; the reasons are the whole point.
-    print("\n" + format_summary(summary))
+    # capsys.disabled(): pytest captures a passing test's stdout, so a bare
+    # print() never reached the CI log -- the summary, and every skip reason
+    # in it, was swallowed on exactly the green runs it exists to explain.
+    with capsys.disabled():
+        print("\n" + format_summary(summary))
 
     failures = [r for r in summary["results"] if r["status"] == "fail"]
     assert not failures, "Python disagrees with the shared table on: " + ", ".join(
