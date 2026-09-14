@@ -1,5 +1,7 @@
 # fancy-flow (Python)
 
+[![Fancified](art/fancified.svg)](https://particle.academy)
+
 The Python runtime for [`fancy-flow`](https://github.com/Particle-Academy/fancy-flow)
 workflow graphs — the third twin of its headless TypeScript engine, alongside
 [`fancy-flow-php`](https://github.com/Particle-Academy/fancy-flow-php).
