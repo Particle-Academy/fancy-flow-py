@@ -88,8 +88,24 @@ def validate(manifest: Any) -> list[Problem]:
                 )
             ]
 
-    if not isinstance(manifest.get("name"), str) or not str(manifest.get("name")).strip():
-        problems.append(_error("name", "Required - the package name as installed."))
+    # `name` is OPTIONAL: the package this node is published from, when it is
+    # published from one. Provenance only -- `fancy-cli add node` vendors the
+    # source and installs nothing named here. First-party nodes are source served
+    # straight from the registry and have no package, so while this was required
+    # their manifests carried an invented one (`particle-academy/fancy-flow-nodes`),
+    # and an agent following it ran `composer require` into a 404.
+    #
+    # Membership, not `.get()`: a present `None` is a manifest that tried to name
+    # its package and failed, and the TypeScript and PHP twins both treat it so.
+    if "name" in manifest and (
+        not isinstance(manifest["name"], str) or not manifest["name"].strip()
+    ):
+        problems.append(
+            _error(
+                "name",
+                "When present, the package this node is published from. Omit it if there is none.",
+            )
+        )
 
     _validate_kind(manifest.get("kind"), problems)
 

@@ -89,6 +89,26 @@ def test_an_unchecked_range_is_a_warning_not_silence() -> None:
     assert [p["level"] for p in problems] == ["warning"]
 
 
+def test_a_node_not_published_from_a_package_names_none() -> None:
+    """First-party nodes are source served straight from the registry: there is
+    no package. A REQUIRED package name could only be satisfied by inventing one,
+    and the first-party manifests did exactly that -- `particle-academy/fancy-flow-nodes`,
+    which never existed, and which an agent then tried to `composer require`."""
+    m = manifest()
+    del m["name"]
+    assert validate(m) == []
+    assert is_valid(m)
+
+
+@pytest.mark.parametrize("name", ["", "   ", 42, None])
+def test_a_name_that_is_present_but_says_nothing_is_still_refused(name: object) -> None:
+    """Optional is not "anything goes": present is present, `None` included, and
+    the TypeScript and PHP twins agree."""
+    problems = [p for p in validate(manifest(name=name)) if p["field"] == "name"]
+    assert [p["level"] for p in problems] == ["error"]
+    assert "Omit it" in problems[0]["message"]
+
+
 def test_a_bare_kind_id_is_refused() -> None:
     """The one mistake that cannot be repaired: the ambiguous string is already
     written into saved documents."""
