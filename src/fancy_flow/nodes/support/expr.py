@@ -17,8 +17,7 @@ Two decisions are load-bearing and easy to get wrong in Python:
   survived the obvious pattern fix -- a global lazy scan for a delimiter that
   never arrives is quadratic by construction. Python's ``re`` has the same
   backtracking engine, so the same scan is used here rather than a translated
-  pattern. It also happens to be the only way to reproduce the peer runtimes'
-  one odd corner exactly (see :func:`_whole_expression`).
+  pattern.
 * **Truthiness is PHP's, not Python's.** ``"0"``, ``"false"`` and ``[]`` are
   all truthy in JavaScript and falsy in PHP; a branch node reading a form value
   or a JSON body hits every one of them.
@@ -37,18 +36,26 @@ _FALSY_STRINGS: Final = frozenset({"", "0", "false", "no", "off", "null"})
 
 
 def _whole_expression(trimmed: str) -> str | None:
-    """The inner text of a template that is exactly one expression, else ``None``.
+    """The inner text of a template that is EXACTLY one expression, else ``None``.
 
-    Note the deliberate corner: ``{{a}}{{b}}`` is a WHOLE expression whose path
-    is ``a}}{{b`` (which resolves to ``None``), because the PHP pattern is
-    end-anchored and its lazy capture has to grow to reach the end. Both peer
-    runtimes do this; reproducing it is the point.
+    Starting with ``{{`` and ending with ``}}`` is not enough: the inner text may
+    contain neither ``}}`` nor ``{{``. Without that check
+    ``{{ in.text }} --- {{ user.transcript }}`` was ONE path,
+    ``in.text }} --- {{ user.transcript``, that resolves to nothing, so the
+    template returned ``None`` (fancy-flow-php#16). That corner came from PHP's
+    end-anchored pattern, whose lazy capture grew to reach the end; it was
+    documented here as deliberate and mirrored in every runtime, so no parity
+    table could see it. A template with several references now interpolates
+    each, and ``{{a}}{{b}}`` is two references.
     """
     if len(trimmed) < 4:
         return None
     if not trimmed.startswith("{{") or not trimmed.endswith("}}"):
         return None
-    return trimmed[2:-2]
+    inner = trimmed[2:-2]
+    if "}}" in inner or "{{" in inner:
+        return None
+    return inner
 
 
 def _interpolate(template: str, resolve: Callable[[str], str]) -> str:

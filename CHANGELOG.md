@@ -8,6 +8,36 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-09-14
+
+### Fixed
+
+- **A template that starts with `{{` and ends with `}}` but holds more than one
+  reference resolved to nothing** (fancy-flow-php#16).
+  `evaluate("{{ in.text }} --- {{ user.transcript }}", ...)` returned `None`:
+  `_whole_expression` asked only whether the trimmed template starts with `{{`
+  and ends with `}}`, so it read `in.text }} --- {{ user.transcript` as ONE path,
+  which never resolves. A prompt or document template shaped like that wrote
+  nothing, with every reference valid. It returned the template itself under
+  `"keep"` and raised under `"throw"`. The whole-string branch now applies only
+  when the inner text contains neither `}}` nor `{{`; anything else interpolates
+  each reference, under every policy. `{{ a }}{{ b }}` is `"12"`.
+
+  This was documented as a deliberate corner and mirrored in all four runtimes,
+  which is why no parity table caught it. fancy-flow-php 0.52.2 fixed it first;
+  `@particle-academy/fancy-flow` 0.70.4 and fancy-flow-rs carry the same rule.
+
+  **What to do:** nothing, unless something relied on such a template returning
+  `None` (or itself, under `"keep"`). It now returns the interpolated string. A
+  single expression, whitespace-padded or not, still returns its typed value.
+
+### Changed
+
+- **Tests pin fancy-conformance 0.23.0** (was 0.22.1), in
+  `test_pinned_suite_version.py` and the CI checkout together. Its `shared/expr`
+  0021-0026 pin the fix above, so that table is now 26 rows; every other table
+  printed the same counts as before. Test-only: nothing installs it.
+
 ## [0.20.1] - 2026-09-13
 
 ### Fixed

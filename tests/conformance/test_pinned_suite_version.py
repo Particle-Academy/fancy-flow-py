@@ -28,10 +28,17 @@ from fancy_conformance import version
 # re-run against a v0.22.1 checkout first all the same, and each printed the
 # counts above, the same six skips (0201-0206) included -- nothing failed.
 #
+# Moved 0.22.1 -> 0.23.0 on 2026-09-14, in the same change as the
+# fancy-flow-php#16 fix in `_whole_expression`. 0.23.0 adds shared/expr
+# 0021-0026 (a whole-string expression is exactly one `{{ }}`), so that table is
+# now 26; the code before the fix failed 0021, 0022, 0023, 0025 and 0026. Every
+# other table was re-run against a v0.23.0 checkout and printed the counts above,
+# the six skips included -- nothing failed.
+#
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together, and only after re-running the tables;
 # test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.22.1"
+PINNED_SUITE_VERSION = "0.23.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(

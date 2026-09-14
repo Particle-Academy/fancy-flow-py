@@ -153,11 +153,12 @@ def test_throw_does_not_fire_for_resolved_empties() -> None:
     assert evaluate("{{ in.count }}", ctx(), "throw") == 0
 
 
-def test_the_two_expression_corner_becomes_visible() -> None:
-    # A template that both starts with `{{` and ends with `}}` is ONE whole
-    # expression whose path contains the inner `}}{{`. Deliberate, and mirrored
-    # in all three runtimes. Under "keep" the author at least SEES that the
-    # template was never split.
-    two_looking = "{{ in.text }} / {{ in.text }}"
-    assert evaluate(two_looking, ctx()) is None
-    assert evaluate(two_looking, ctx(), "keep") == two_looking
+def test_a_template_that_starts_and_ends_with_a_reference_but_holds_two_interpolates() -> None:
+    # This test used to PIN the corner: a template starting with `{{` and ending
+    # with `}}` was one whole expression whose path spanned the inner `}}{{`, so
+    # it returned None, and itself under "keep". That was the bug in
+    # fancy-flow-php#16, not a deliberate behaviour. See
+    # test_template_with_several_references.py.
+    two = "{{ in.text }} / {{ in.text }}"
+    assert evaluate(two, ctx()) == "hello / hello"
+    assert evaluate(two, ctx(), "keep") == "hello / hello"

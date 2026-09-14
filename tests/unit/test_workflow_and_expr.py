@@ -165,14 +165,16 @@ def test_to_json_is_parseable() -> None:
 # -- expression corners --------------------------------------------------
 
 
-def test_two_adjacent_expressions_are_one_whole_expression() -> None:
-    """The odd corner all three runtimes share.
+def test_two_adjacent_expressions_are_two_references() -> None:
+    """`{{a}}{{b}}` interpolates both references.
 
-    `{{a}}{{b}}` is a WHOLE expression whose path is `a}}{{b`, because PHP's
-    pattern is end-anchored and its lazy capture has to grow to reach the end.
-    A "sensible" implementation that interpolated both would diverge.
+    This test used to pin the opposite: a WHOLE expression whose path is
+    `a}}{{b`, resolving to None, because PHP's pattern is end-anchored and its
+    lazy capture grew to reach the end. Every runtime reproduced that on
+    purpose, which is how fancy-flow-php#16 survived every parity table.
+    shared/expr 0023 now pins the interpolation in all four.
     """
-    assert expr.evaluate("{{a}}{{b}}", {"a": 1, "b": 2}) is None
+    assert expr.evaluate("{{a}}{{b}}", {"a": 1, "b": 2}) == "12"
 
 
 def test_an_unterminated_expression_is_literal_text() -> None:
