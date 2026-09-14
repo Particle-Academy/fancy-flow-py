@@ -23,10 +23,15 @@ from fancy_conformance import version
 # shared/expr 20, flow/kind-declaration-surface 20, shared/satisfies-range 17,
 # shared/flow-run-identity 25, flow/workflow-props 21 -- nothing failed.
 #
+# Moved 0.22.0 -> 0.22.1 on 2026-09-13. That release changed no case and no
+# golden (the Rust loader pins fancy-json by tag, plus docs); every table was
+# re-run against a v0.22.1 checkout first all the same, and each printed the
+# counts above, the same six skips (0201-0206) included -- nothing failed.
+#
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together, and only after re-running the tables;
 # test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.22.0"
+PINNED_SUITE_VERSION = "0.22.1"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(
