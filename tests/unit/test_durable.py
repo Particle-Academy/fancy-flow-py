@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from fancy_flow import (
@@ -14,6 +16,7 @@ from fancy_flow import (
     Pause,
     PauseSignal,
     PortDescriptor,
+    RunEvent,
 )
 from fancy_flow.durable import (
     Coordinator,
@@ -165,6 +168,28 @@ def test_a_settled_node_cannot_be_reclaimed() -> None:
     assert store.claim("run", "n", "worker-a") is False
 
 
+def test_a_skip_reports_whether_it_settled_the_node() -> None:
+    """What lets the Coordinator deliver a skipped node's warning exactly once.
+
+    Two callers deciding from the same frontier both skip the same node. Only
+    the first settled it, and only the first may speak for it. A settled row is
+    never overwritten -- a stale skip landing on a COMPLETED node would erase
+    its output.
+    """
+    store = InMemoryClaimStore()
+    assert store.skip("run", "n") is True
+    assert store.skip("run", "n") is False
+
+    store.claim("run", "c", "worker-a")
+    assert store.skip("run", "c") is True, "a held claim is not settled"
+
+    store.claim("run", "done", "worker-a")
+    store.complete("run", "done", "value", ("out",))
+    assert store.skip("run", "done") is False
+    assert store.state("run")["done"].status == NodeRunStatus.COMPLETED
+    assert store.state("run")["done"].output == "value"
+
+
 # -- retries -------------------------------------------------------------
 
 
@@ -207,6 +232,166 @@ def test_a_per_kind_override_matches_any_spelling() -> None:
     policy = RetryPolicy(tries=1, per_kind={"git_pr_open": 4})
     node = FlowNode("n", "@particle-academy/git_pr_open")
     assert policy.tries_for(node, kinds_with(None)) == 4
+
+
+# -- run diagnostics under the durable driver ----------------------------
+
+
+class _Lagging:
+    """A claim store whose READS lag its writes.
+
+    Every ``state()`` returns the snapshot it was built with, which is what two
+    ``advance()`` calls see when they decide from the same frontier before
+    either has settled it. ``skip_returns_none`` makes it an older store, from
+    before ``skip`` reported anything.
+    """
+
+    def __init__(
+        self,
+        inner: InMemoryClaimStore,
+        run_key: str,
+        skip_returns_none: bool = False,
+    ) -> None:
+        self.inner = inner
+        self.snapshot = inner.state(run_key)
+        self.skip_returns_none = skip_returns_none
+
+    def claim(self, run_key: str, node_id: str, owner: str) -> bool:
+        return self.inner.claim(run_key, node_id, owner)
+
+    def state(self, run_key: str) -> dict[str, NodeState]:
+        return dict(self.snapshot)
+
+    def complete(self, run_key: str, node_id: str, output: Any, ports: tuple[str, ...]) -> None:
+        self.inner.complete(run_key, node_id, output, ports)
+
+    def skip(self, run_key: str, node_id: str) -> bool | None:
+        settled = self.inner.skip(run_key, node_id)
+        return None if self.skip_returns_none else settled
+
+    def fail(self, run_key: str, node_id: str, error: str) -> None:
+        self.inner.fail(run_key, node_id, error)
+
+    def pause(self, run_key: str, node_id: str, reason: str) -> None:
+        self.inner.pause(run_key, node_id, reason)
+
+
+def undelivered_graph() -> FlowGraph:
+    """``s`` publishes ``out``; the only edge into ``o`` reads ``result``."""
+    return FlowGraph(
+        nodes=(FlowNode("s", "src"), FlowNode("o", "sink")),
+        edges=(FlowEdge("e", "s", "o", source_handle="result"),),
+    )
+
+
+def undelivered_executors() -> ExecutorRegistry:
+    return ExecutorRegistry().bind("src", lambda ctx: "value").bind("sink", lambda ctx: "sunk")
+
+
+def warn_logs(events: list[RunEvent]) -> list[RunEvent]:
+    return [e for e in events if e.type == RunEvent.LOG and e.level == "warn"]
+
+
+def test_a_skipped_targets_undelivered_edge_warning_reaches_the_host() -> None:
+    """The 0.21.0 known gap: the target never gets a job, so nothing forwarded it."""
+    events: list[RunEvent] = []
+    result = Coordinator(
+        graph=undelivered_graph(),
+        executors=undelivered_executors(),
+        run="gap",
+        on_event=events.append,
+    ).run_to_completion()
+
+    assert result.ok
+    warnings = warn_logs(events)
+    assert [(w.node_id, w.detail) for w in warnings] == [
+        ("o", {"edge": "e", "source": "s", "sourceHandle": "result"})
+    ]
+    assert warnings[0].message == (
+        'Edge e reads port "result" from node s, which never publishes it — nothing '
+        "would reach o at run time. Available: out. Leave sourceHandle off to read the "
+        "node's output."
+    )
+
+
+def test_a_skip_another_caller_already_settled_does_not_warn_again() -> None:
+    """Exactly once per skipped node, however many callers reach the decision."""
+    graph = undelivered_graph()
+    inner = InMemoryClaimStore()
+    Coordinator(graph=graph, executors=undelivered_executors(), run="race", store=inner).run_node(
+        "s"
+    )
+
+    events: list[RunEvent] = []
+    coordinator = Coordinator(
+        graph=graph,
+        executors=undelivered_executors(),
+        run="race",
+        store=_Lagging(inner, "race"),
+        on_event=events.append,
+    )
+
+    # Both read the same frontier, so both decide `o` is skipped.
+    assert Frontier.compute(graph, coordinator.store.state("race")).skipped == ("o",)
+    coordinator.advance()
+    coordinator.advance()
+
+    assert inner.state("race")["o"].status == NodeRunStatus.SKIPPED
+    assert [w.node_id for w in warn_logs(events)] == ["o"]
+
+
+def test_a_store_whose_skip_returns_nothing_still_delivers_the_warning() -> None:
+    """A store written before ``skip`` reported anything counts as "settled now"."""
+    graph = undelivered_graph()
+    inner = InMemoryClaimStore()
+    Coordinator(graph=graph, executors=undelivered_executors(), run="old", store=inner).run_node(
+        "s"
+    )
+
+    events: list[RunEvent] = []
+    Coordinator(
+        graph=graph,
+        executors=undelivered_executors(),
+        run="old",
+        store=_Lagging(inner, "old", skip_returns_none=True),
+        on_event=events.append,
+    ).advance()
+
+    assert [w.node_id for w in warn_logs(events)] == ["o"]
+
+
+def test_the_replay_resolves_ports_against_the_coordinators_registry() -> None:
+    """``kinds`` was consulted for retries and ignored by the replay.
+
+    So a node with no declared outputs published on the SHARED registry's idea
+    of its kind -- here, nothing, so ``out`` -- and the edge reading the port its
+    own registry declares never lit. A different run from the same graph, with
+    the registry the host passed sitting right there.
+    """
+    registry = NodeKindRegistry().register(
+        NodeKind(
+            name="two_port_under_test",
+            category="logic",
+            label="Two ports",
+            outputs=(PortDescriptor("yes"), PortDescriptor("no")),
+        )
+    )
+    graph = FlowGraph(
+        nodes=(FlowNode("t", "two_port_under_test"), FlowNode("n", "k")),
+        edges=(FlowEdge("e", "t", "n", source_handle="yes"),),
+    )
+    executors = (
+        ExecutorRegistry()
+        .bind("two_port_under_test", lambda ctx: "v")
+        .bind("k", lambda ctx: ctx.inputs.get("in"))
+    )
+    coordinator = Coordinator(graph=graph, executors=executors, run="kinds", kinds=registry)
+
+    result = coordinator.run_to_completion()
+
+    assert coordinator.store.state("kinds")["t"].ports == ("yes", "no")
+    assert result.ok
+    assert result.outputs == {"t": "v", "n": "v"}
 
 
 # -- human gates ---------------------------------------------------------

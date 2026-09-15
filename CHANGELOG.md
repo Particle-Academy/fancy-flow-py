@@ -8,6 +8,47 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-14
+
+### Fixed
+
+- **The durable `Coordinator` now delivers the undelivered-edge warning for a
+  SKIPPED target** (fancy-flow#17). This closes the 0.21.0 known gap. The
+  target of an edge that was its only inbound one never gets a job. So its
+  warning was emitted inside other jobs' replays and filtered out, and a host
+  driving the run durably never saw it. `Coordinator.advance()` now delivers it
+  at the frontier's skip decision, to `on_event`, **exactly once** per skipped
+  node. A target that RUNS beside a live edge still gets its warning from its
+  own job, and is not reported twice.
+  - **One implementation of the check.** It moved out of `FlowRunner` into the
+    public `fancy_flow.engine.diagnostics.undelivered_edge_warnings(target,
+    incoming, port_values, completed, nodes_by_id, registry) -> list[RunEvent]`,
+    also exported from `fancy_flow.engine`. It returns the `log`/`warn` events
+    and emits nothing. `FlowRunner` and the `Coordinator` both call it, and
+    `FlowRunner`'s output is unchanged.
+  - **Exactly once, even when two callers reach the same skip.**
+    `NodeClaimStore.skip` may now return whether it settled the node, and
+    `Frontier.settle_skips` returns the nodes that call settled.
+    `InMemoryClaimStore.skip` returns `False` for a row that is already settled
+    and leaves that row as it was. Before this, a stale skip could overwrite a
+    COMPLETED row.
+  - **The replay honours `Coordinator.kinds`.** `replay_up_to` built
+    `FlowRunner()` against the shared registry and ignored the registry the
+    Coordinator was given. So a node with no declared outputs published on the
+    shared registry's idea of its kind, and a durable run could route
+    differently from a single-process run of the same graph. `replay_up_to`
+    takes `kinds=` (default `None`, the shared one, as before), and the
+    Coordinator passes its own.
+  - **Parity is a test result.**
+    `tests/conformance/test_run_diagnostics_durable_conformance.py` runs all 14
+    rows of fancy-conformance `flow/run-diagnostics` through the Coordinator.
+    Before this fix, 0008, 0010 and 0012 failed.
+
+  **What you must do:** nothing. A custom `NodeClaimStore` whose `skip` returns
+  `None` keeps working: every skip counts as settled by that call, so its
+  warnings are still delivered. Two callers racing on the same skip can then
+  both deliver one, though. Return a `bool` to get exactly-once.
+
 ## [0.21.0] - 2026-09-14
 
 ### Added

@@ -5,7 +5,8 @@ two operations and nothing else:
 
 ``advance()``
     Ask the frontier what is unblocked, settle the skip cascade, and report the
-    ready node ids. A queue adapter dispatches one job per id.
+    ready node ids. A queue adapter dispatches one job per id. A node settled as
+    skipped gets no job, so its run diagnostics are delivered here instead.
 
 ``run_node()``
     Claim one node, replay the graph through the real engine fenced to that
@@ -29,17 +30,18 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from ..engine.diagnostics import undelivered_edge_warnings
 from ..executors import ExecutorRegistry
 from ..registry.registry import NodeKindRegistry, default_registry
 from ..runtime.events import RunEvent
 from ..runtime.identity import RunIdentity
 from ..runtime.options import RunResult
 from ..runtime.pause import Pause, PauseSignal
-from ..schema.graph import FlowGraph
+from ..schema.graph import FlowEdge, FlowGraph
 from .frontier import Frontier
 from .replay import is_boundary, replay_up_to
 from .retry import RetryPolicy
-from .state import InMemoryClaimStore, NodeClaimStore, NodeRunStatus
+from .state import InMemoryClaimStore, NodeClaimStore, NodeRunStatus, NodeState
 
 __all__ = ["Coordinator", "DurableRunResult", "NodeOutcome"]
 
@@ -120,9 +122,19 @@ class Coordinator:
 
         Also settles the skip cascade, because a skip is a decision the frontier
         just made and a second caller must not make it again.
+
+        And delivers the skipped nodes' undelivered-edge warnings, because this
+        is the only place a skipped node is ever looked at. It never gets a job,
+        so its warning was emitted inside OTHER jobs' replays and filtered out
+        there -- a host driving the run durably never saw a warning that a
+        single-process run of the same graph delivers. Only for the nodes THIS
+        call settled: a second caller reaching the same skip decision must not
+        report it twice.
         """
-        frontier = Frontier.compute(self.graph, self.store.state(self.run_key))
-        Frontier.settle_skips(self.store, self.run_key, frontier.skipped)
+        state = self.store.state(self.run_key)
+        frontier = Frontier.compute(self.graph, state)
+        settled = Frontier.settle_skips(self.store, self.run_key, frontier.skipped)
+        self._deliver_skip_diagnostics(settled, state)
         return frontier.ready
 
     def run_node(self, node_id: str, owner: str | None = None) -> NodeOutcome:
@@ -156,6 +168,7 @@ class Coordinator:
             initial_inputs=self.initial_inputs,
             on_event=self._forward(node_id),
             run=identity,
+            kinds=self.kinds,
         )
         result = replay.result
 
@@ -211,7 +224,7 @@ class Coordinator:
         node = next((n for n in self.graph.nodes if n.id == node_id), None)
         if node is None:
             return 1
-        return self.retry.tries_for(node, self.kinds or default_registry())
+        return self.retry.tries_for(node, self._registry())
 
     # -- an in-process driver over the two ------------------------------
 
@@ -303,6 +316,60 @@ class Coordinator:
         return RunResult(outcome.ok, outcome.outputs, outcome.error)
 
     # -- internals -------------------------------------------------------
+
+    def _registry(self) -> NodeKindRegistry:
+        """The kinds this run resolves against. ``None`` means the shared one."""
+        return self.kinds if self.kinds is not None else default_registry()
+
+    def _deliver_skip_diagnostics(
+        self, skipped: tuple[str, ...], state: dict[str, NodeState]
+    ) -> None:
+        """Send each skipped node's undelivered-edge warnings to ``on_event``.
+
+        The check is the engine's own :func:`undelivered_edge_warnings`, fed the
+        durable spelling of what the walk holds at that node: the ports every
+        COMPLETED node stored, in stored order, keyed as the engine keys them.
+        The frontier skips a node only once every source has settled, so every
+        edge it asks about is decided -- exactly as in the walk's topological
+        order.
+
+        A skipped node is the ONLY case handled here. A target that runs, beside
+        a live edge, gets its warning from its own job's replay, which carries
+        its node id and is forwarded; delivering it here too would report it
+        twice.
+        """
+        if self.on_event is None or not skipped:
+            return
+
+        completed: dict[str, NodeState] = {
+            node_id: entry
+            for node_id, entry in state.items()
+            if entry.status == NodeRunStatus.COMPLETED
+        }
+        port_values = {
+            f"{node_id}:{port}": None
+            for node_id, entry in completed.items()
+            for port in entry.ports
+        }
+        nodes_by_id = {node.id: node for node in self.graph.nodes}
+        incoming: dict[str, list[FlowEdge]] = {}
+        for edge in self.graph.edges:
+            incoming.setdefault(edge.target, []).append(edge)
+        registry = self._registry()
+
+        for node_id in skipped:
+            node = nodes_by_id.get(node_id)
+            if node is None:
+                continue
+            for warning in undelivered_edge_warnings(
+                node,
+                incoming.get(node_id, ()),
+                port_values,
+                completed.keys(),
+                nodes_by_id,
+                registry,
+            ):
+                self.on_event(warning)
 
     def _completed_outputs(self) -> dict[str, Any]:
         state = self.store.state(self.run_key)

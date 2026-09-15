@@ -139,7 +139,13 @@ class Frontier:
         )
 
     @staticmethod
-    def settle_skips(store: NodeClaimStore, run_key: str, skipped: tuple[str, ...]) -> None:
-        """Persist the skip cascade so the next pass does not recompute it."""
-        for node_id in skipped:
-            store.skip(run_key, node_id)
+    def settle_skips(
+        store: NodeClaimStore, run_key: str, skipped: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        """Persist the skip cascade so the next pass does not recompute it.
+
+        Returns the nodes THIS call settled, in cascade order. A node another
+        caller had already settled is left out, and a store whose ``skip``
+        returns ``None`` counts every node as settled here.
+        """
+        return tuple(node_id for node_id in skipped if store.skip(run_key, node_id) is not False)

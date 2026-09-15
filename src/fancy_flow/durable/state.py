@@ -88,7 +88,18 @@ class NodeClaimStore(Protocol):
         self, run_key: str, node_id: str, output: Any, ports: tuple[str, ...]
     ) -> None: ...  # pragma: no cover
 
-    def skip(self, run_key: str, node_id: str) -> None: ...  # pragma: no cover
+    def skip(self, run_key: str, node_id: str) -> bool | None:
+        """Settle one node as skipped.
+
+        Return ``True`` when THIS call settled it and ``False`` when the node was
+        already settled, leaving that row as it was. It is what lets the
+        Coordinator deliver a skipped node's diagnostics exactly once when two
+        callers reach the same skip decision.
+
+        ``None`` -- a store written before this reported anything -- is taken as
+        "settled now", so an older adapter keeps working and still delivers them.
+        """
+        ...  # pragma: no cover - protocol
 
     def fail(self, run_key: str, node_id: str, error: str) -> None: ...  # pragma: no cover
 
@@ -143,11 +154,19 @@ class InMemoryClaimStore:
             entry.ports = tuple(ports)
             entry.error = None
 
-    def skip(self, run_key: str, node_id: str) -> None:
+    def skip(self, run_key: str, node_id: str) -> bool:
         with self._lock:
+            existing = self._runs.get(run_key, {}).get(node_id)
+            # A settled row is a decision already made. Re-settling it would
+            # report a second skip, and a stale skip landing on a COMPLETED node
+            # would erase its output.
+            if existing is not None and existing.status in NodeRunStatus.SETTLED:
+                return False
+
             entry = self._entry(run_key, node_id)
             entry.status = NodeRunStatus.SKIPPED
             entry.ports = ()
+            return True
 
     def fail(self, run_key: str, node_id: str, error: str) -> None:
         with self._lock:

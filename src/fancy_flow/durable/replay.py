@@ -45,6 +45,7 @@ from typing import Any, Final, NoReturn
 
 from ..engine.runner import FlowRunner
 from ..executors import ExecutorRegistry
+from ..registry.registry import NodeKindRegistry
 from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
 from ..runtime.identity import RunIdentity
@@ -84,12 +85,20 @@ def replay_up_to(
     on_event: Callable[[RunEvent], None] | None = None,
     depth: int = 0,
     run: RunIdentity | None = None,
+    kinds: NodeKindRegistry | None = None,
 ) -> ReplayResult:
     """Replay ``graph`` up to and through ``node_id``.
 
     Pass ``node_id=None`` to PROBE: every node is a boundary, so nothing
     executes and the engine reports only what it can determine structurally --
     a cycle, and the ports each resumed output republishes on.
+
+    ``kinds`` is the registry the engine resolves ports against, exactly as
+    ``FlowRunner(kinds)`` takes it; ``None`` means the shared one. A driver must
+    pass the registry its run was configured with. Replaying against a different
+    one publishes a node with no declared outputs on THAT registry's idea of its
+    kind -- ``for_each`` on ``out`` instead of ``item`` / ``done`` -- so the
+    durable run routes differently from a single-process run of the same graph.
     """
     fork = executors.fork()
     for node in graph.nodes:
@@ -106,7 +115,7 @@ def replay_up_to(
         if on_event is not None:
             on_event(event)
 
-    result = FlowRunner().run(
+    result = FlowRunner(kinds).run(
         graph,
         fork,
         collect,
