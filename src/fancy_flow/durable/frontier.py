@@ -133,10 +133,7 @@ class Frontier:
         cannot progress at all -- which is a stuck run, and must be reported
         rather than waited on.
         """
-        return any(
-            entry.status in (NodeRunStatus.CLAIMED, NodeRunStatus.PAUSED)
-            for entry in state.values()
-        )
+        return any(entry.status in NodeRunStatus.HELD for entry in state.values())
 
     @staticmethod
     def settle_skips(

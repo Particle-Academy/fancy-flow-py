@@ -92,16 +92,31 @@ from fancy_flow.durable import Coordinator
 
 flow = Coordinator(graph=graph, executors=executors, run=run_id, store=store)
 
-ready = flow.advance()  # what is unblocked right now -> dispatch these
+ready = flow.advance()  # what may be dispatched right now -> one job per id
 flow.run_node(node_id)  # claim, run through the real engine, checkpoint
 flow.run_to_completion()  # or drive both, here, in this process
 ```
 
 `advance()` and `run_node()` are the two operations a Celery / Dramatiq / Taskiq
-job wraps. `Coordinator.run_to_completion()` over a persistent `NodeClaimStore`
-is already a real durable runner: a crash resumes from the same place a crashed
-worker would, because the resume behaviour lives in the checkpoints rather than
-in the loop.
+job wraps: call `advance()` again whenever a job settles. `Coordinator.run_to_completion()`
+over a persistent `NodeClaimStore` is already a real durable runner: a crash
+resumes from the same place a crashed worker would, because the resume behaviour
+lives in the checkpoints rather than in the loop.
+
+**A queued run dispatches one node at a time by default.** A node goes on the
+queue only after the node before it has settled, in the graph's declaration
+order, and a node paused for a person keeps its slot, so nothing is handed out
+beside a gate while the person decides. `advance()` returns nothing while a node
+of the run is held. To hand out the whole ready frontier instead, opt in:
+
+```python
+from fancy_flow.durable import UNLIMITED_CONCURRENCY
+
+Coordinator(..., max_concurrent=UNLIMITED_CONCURRENCY)  # every ready node at once
+Coordinator(..., max_concurrent=4)  # at most four of this run's nodes held at once
+```
+
+A negative, `bool` or non-`int` `max_concurrent` is refused at construction.
 
 Human gates **fail closed**: `user_input` and `human_approval` pause because
 they *are* human nodes, not because their input port happens to be empty. Only a
@@ -122,8 +137,9 @@ GraphPolicy.untrusted(allow=["manual_trigger", "transform", "output"]).assert_sa
 ## Parity
 
 The guarantee is asserted, not asserted-to. The suite runs the shared
-`shared/expr` and `shared/satisfies-range` tables from
-[`fancy-conformance`](https://github.com/Particle-Academy/fancy-conformance),
+tables from
+[`fancy-conformance`](https://github.com/Particle-Academy/fancy-conformance)
+(among them `shared/expr`, `shared/satisfies-range` and `flow/durable-dispatch`),
 the 23 golden `WorkflowSchema` fixtures, and — because a queued run derives
 readiness from the opposite end — every one of those fixtures a second time
 through the per-node durable driver.

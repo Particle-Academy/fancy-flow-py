@@ -127,6 +127,25 @@ is how a queue adapter learns to re-dispatch — with the SAME owner token.
 `Coordinator.run_to_completion()` drives both operations in-process. It is a real
 durable runner over a persistent store, not a stand-in for one.
 
+**Dispatch is serial by default** (`durable/dispatch.py`, fancy-flow-php#17).
+`Coordinator.max_concurrent` caps how many of one run's nodes are HELD at once,
+and `advance()` returns `select_dispatch(frontier.ready, state, max_concurrent)`:
+`1` (the default) is one node at a time in declaration order, `0`
+(`UNLIMITED_CONCURRENCY`) is the whole ready frontier. Two rules in it fail
+silently when broken:
+
+- **Held is CLAIMED + PAUSED** (`NodeRunStatus.HELD`). A pause does not park the
+  run on this coordinator, so a gate that freed its slot would let a queue
+  adapter hand out its siblings while the person is still deciding. Resuming a
+  gate -- `release()` then `advance()`, or re-entering the paused claim with its
+  own owner token -- frees the slot; both paths are tested.
+- **The budget counts work already held, never one call's batch.** Two settles
+  on a real queue each call `advance()`; a per-batch cap lets each hand out its
+  own quota.
+
+Pinned by `flow/durable-dispatch`, whose simulation calls the same
+`Frontier.compute` and `select_dispatch`.
+
 ### Kind ids
 
 Canonical ids are `@particle-academy/<name>`; old spellings live on as aliases.
@@ -186,10 +205,11 @@ Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
 
 ## Parity is a test result, not a claim
 
-- `tests/conformance/` runs eight tables from `particle-academy/fancy-conformance`:
+- `tests/conformance/` runs nine tables from `particle-academy/fancy-conformance`:
   `shared/expr`, `shared/satisfies-range`, `shared/flow-run-identity`,
-  `flow/entry-points`, `flow/executor-resolution`, `flow/kind-declaration-surface`,
-  `flow/run-diagnostics` and `flow/workflow-props`, through that package's own
+  `flow/durable-dispatch`, `flow/entry-points`, `flow/executor-resolution`,
+  `flow/kind-declaration-surface`, `flow/run-diagnostics` and
+  `flow/workflow-props`, through that package's own
   Python loader, `fancy_conformance` (on pytest's `pythonpath` from the envelope
   checkout; CI sets `PYTHONPATH` to its tag checkout).
   A missing conformance checkout is a **failure**, never a skip.

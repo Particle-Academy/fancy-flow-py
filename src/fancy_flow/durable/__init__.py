@@ -16,12 +16,14 @@ So durability lives here, in the pure core:
 - :mod:`.replay`      run one node THROUGH the engine, never around it
 - :mod:`.retry`       how many attempts a node gets, per node
 - :mod:`.human`       gates that pause and cannot be walked past
+- :mod:`.dispatch`    how many of a run's nodes may be held at once -- ONE by default
 - :mod:`.coordinator` the two operations a queue adapter dispatches
 
 A queue adapter supplies transport and nothing else.
 """
 
 from .coordinator import Coordinator, DurableRunResult, NodeOutcome
+from .dispatch import UNLIMITED_CONCURRENCY, select_dispatch
 from .frontier import Frontier, FrontierResult
 from .human import DurableApproval, DurableUserInput, NotAwaitingHuman, Submissions
 from .replay import BOUNDARY, FENCE_PORT, ReplayResult, is_boundary, replay_up_to
@@ -31,6 +33,7 @@ from .state import InMemoryClaimStore, NodeClaimStore, NodeRunStatus, NodeState
 __all__ = [
     "BOUNDARY",
     "FENCE_PORT",
+    "UNLIMITED_CONCURRENCY",
     "UNSAFE_TO_REPLAY",
     "Coordinator",
     "DurableApproval",
@@ -49,4 +52,5 @@ __all__ = [
     "Submissions",
     "is_boundary",
     "replay_up_to",
+    "select_dispatch",
 ]

@@ -20,6 +20,7 @@ from fancy_flow import (
     RunEvent,
 )
 from fancy_flow.durable import (
+    UNLIMITED_CONCURRENCY,
     Coordinator,
     DurableApproval,
     DurableUserInput,
@@ -30,6 +31,7 @@ from fancy_flow.durable import (
     NotAwaitingHuman,
     RetryPolicy,
     Submissions,
+    select_dispatch,
 )
 
 # -- the frontier --------------------------------------------------------
@@ -407,7 +409,7 @@ def siblings_graph() -> FlowGraph:
 
 
 def test_a_node_whose_earlier_sibling_has_not_finished_runs_instead_of_skipping() -> None:
-    """Siblings that become ready together are dispatched together.
+    """Siblings that become ready together are dispatched together, when a host opts in.
 
     On real workers nothing orders their jobs: ``b``'s job can start while
     ``a`` is still running. ``b``'s replay walks the engine's topological order,
@@ -428,7 +430,12 @@ def test_a_node_whose_earlier_sibling_has_not_finished_runs_instead_of_skipping(
         return ctx.node.id
 
     coordinator = Coordinator(
-        graph=siblings_graph(), executors=ExecutorRegistry().bind("rec", record), run="siblings"
+        graph=siblings_graph(),
+        executors=ExecutorRegistry().bind("rec", record),
+        run="siblings",
+        # Opted in: the defect needs both siblings handed out at once, which the
+        # serial default no longer does.
+        max_concurrent=UNLIMITED_CONCURRENCY,
     )
 
     assert coordinator.advance() == ("t",)
@@ -511,6 +518,241 @@ def test_a_target_the_engine_skips_is_recorded_skipped_not_failed() -> None:
         assert (
             coordinator.store.state(f"dead-{trailing}")["dead"].status == NodeRunStatus.SKIPPED
         ), f"trailing={trailing}"
+
+
+# -- dispatch: one node at a time unless the host asks -------------------
+
+
+def fan_out_graph() -> FlowGraph:
+    """``t`` fans out to ``a``, ``b`` and ``c``, declared in that order."""
+    return FlowGraph(
+        nodes=tuple(FlowNode(node_id, "rec") for node_id in ("t", "a", "b", "c")),
+        edges=(FlowEdge("e1", "t", "a"), FlowEdge("e2", "t", "b"), FlowEdge("e3", "t", "c")),
+    )
+
+
+def recording(ran: list[str]) -> ExecutorRegistry:
+    def record(ctx: ExecutionContext) -> str:
+        ran.append(ctx.node.id)
+        return ctx.node.id
+
+    return ExecutorRegistry().bind("rec", record)
+
+
+def test_a_queued_run_dispatches_one_node_at_a_time_by_default() -> None:
+    """fancy-flow-php#17, the owner's ruling: a node goes on the queue only after
+    the node before it finishes.
+
+    Every ``advance()`` hands out exactly one id, in declaration order. Before
+    this, the call after ``t`` settled handed out all three siblings at once.
+    """
+    ran: list[str] = []
+    coordinator = Coordinator(graph=fan_out_graph(), executors=recording(ran), run="serial")
+
+    dispatched: list[tuple[str, ...]] = []
+    while ready := coordinator.advance():
+        dispatched.append(ready)
+        for node_id in ready:
+            assert coordinator.run_node(node_id).status == NodeRunStatus.COMPLETED
+
+    assert dispatched == [("t",), ("a",), ("b",), ("c",)]
+    assert ran == ["t", "a", "b", "c"]
+
+
+def test_run_to_completion_takes_the_first_ready_node_in_declaration_order() -> None:
+    """``c`` becomes ready once ``a`` settles and is declared before the waiting
+    ``b``, so it goes next. The whole-frontier driver ran ``b`` first, because
+    ``b`` was in the batch and ``c`` was not. Outputs are unchanged."""
+    ran: list[str] = []
+    graph = FlowGraph(
+        nodes=tuple(FlowNode(node_id, "rec") for node_id in ("t", "c", "a", "b")),
+        edges=(FlowEdge("e1", "t", "a"), FlowEdge("e2", "t", "b"), FlowEdge("e3", "a", "c")),
+    )
+
+    result = Coordinator(graph=graph, executors=recording(ran), run="order").run_to_completion()
+
+    assert result.ok
+    assert ran == ["t", "a", "c", "b"]
+    assert result.outputs == {"t": "t", "c": "c", "a": "a", "b": "b"}
+
+
+def test_unlimited_dispatches_the_whole_frontier_and_a_cap_of_two_dispatches_two() -> None:
+    for limit, expected in ((UNLIMITED_CONCURRENCY, ("a", "b", "c")), (2, ("a", "b"))):
+        coordinator = Coordinator(
+            graph=fan_out_graph(),
+            executors=recording([]),
+            run=f"limit-{limit}",
+            max_concurrent=limit,
+        )
+        assert coordinator.advance() == ("t",)
+        coordinator.run_node("t")
+
+        assert coordinator.advance() == expected, f"max_concurrent={limit}"
+
+
+def test_the_budget_counts_work_already_held_not_the_batch() -> None:
+    """A racing worker's claim takes the only slot.
+
+    On a real queue two settles each trigger an ``advance()``, and a cap applied
+    to one call's batch would let each hand out its own quota. Here ``a`` is
+    claimed out of band, as that worker would have claimed it.
+    """
+    graph = FlowGraph(
+        nodes=tuple(FlowNode(node_id, "rec") for node_id in ("t", "a", "b")),
+        edges=(FlowEdge("e1", "t", "a"), FlowEdge("e2", "t", "b")),
+    )
+
+    def racing(limit: int) -> Coordinator:
+        coordinator = Coordinator(
+            graph=graph, executors=recording([]), run="race", max_concurrent=limit
+        )
+        coordinator.run_node("t")
+        assert coordinator.store.claim("race", "a", "another-worker")
+        return coordinator
+
+    assert racing(1).advance() == ()
+    # The CONTROL: the same held claim leaves a cap of two room for `b`.
+    assert racing(2).advance() == ("b",)
+
+
+def paused_gate_graph() -> FlowGraph:
+    """``t`` fans out to an approval gate and to ``b``; the gate is declared first."""
+    return FlowGraph(
+        nodes=(
+            FlowNode("t", "rec"),
+            FlowNode(
+                "gate",
+                "human_approval",
+                outputs=(PortDescriptor("approved"), PortDescriptor("denied")),
+            ),
+            FlowNode("b", "rec"),
+        ),
+        edges=(FlowEdge("e1", "t", "gate"), FlowEdge("e2", "t", "b")),
+    )
+
+
+def test_a_paused_gate_keeps_its_slot() -> None:
+    """A pause does not park the RUN on this coordinator.
+
+    So a queue adapter calling ``advance()`` after the gate paused was handed
+    ``b`` while the person was still deciding -- the gap the owner's ruling
+    closes. The serial case is built with the default on purpose.
+    """
+    ran: list[str] = []
+
+    def parked(run: str, **options: Any) -> Coordinator:
+        executors = recording(ran).bind("human_approval", DurableApproval(Submissions()))
+        coordinator = Coordinator(
+            graph=paused_gate_graph(), executors=executors, run=run, **options
+        )
+        assert coordinator.run_to_completion().paused
+        assert coordinator.store.state(run)["gate"].status == NodeRunStatus.PAUSED
+        return coordinator
+
+    assert parked("serial").advance() == ()
+    # The CONTROL: under unlimited, the paused gate leaves `b` to be handed out.
+    assert parked("parallel", max_concurrent=UNLIMITED_CONCURRENCY).advance() == ("b",)
+    assert ran == ["t", "t"], "nothing but the trigger ran in either run"
+
+
+def test_a_released_gate_resumes_and_the_run_continues_under_serial() -> None:
+    """The slot a paused gate holds must not outlive the pause.
+
+    Resuming is recording the answer and releasing the paused row, as the other
+    gate tests here do. The released gate is the first thing handed out, it runs
+    again, and what waited behind it follows one node at a time.
+    """
+    ran: list[str] = []
+    submissions = Submissions()
+    graph = FlowGraph(
+        nodes=(
+            FlowNode("t", "rec"),
+            FlowNode(
+                "gate",
+                "human_approval",
+                outputs=(PortDescriptor("approved"), PortDescriptor("denied")),
+            ),
+            FlowNode("b", "rec"),
+            FlowNode("d", "rec"),
+        ),
+        edges=(
+            FlowEdge("e1", "t", "gate"),
+            FlowEdge("e2", "t", "b"),
+            FlowEdge("e3", "gate", "d", source_handle="approved"),
+        ),
+    )
+    executors = recording(ran).bind("human_approval", DurableApproval(submissions))
+    store = InMemoryClaimStore()
+    coordinator = Coordinator(graph=graph, executors=executors, run="resume", store=store)
+
+    assert coordinator.run_to_completion().paused
+    assert coordinator.advance() == ()
+    assert "b" not in store.state("resume"), "nothing was handed out behind the gate"
+
+    submissions.record("gate", True)
+    store.release("resume", "gate")
+
+    assert coordinator.advance() == ("gate",)
+    resumed = coordinator.run_to_completion()
+
+    assert resumed.ok, resumed.error
+    assert set(resumed.outputs) == {"t", "gate", "b", "d"}
+    assert ran == ["t", "b", "d"]
+
+
+def test_a_gate_re_entered_by_its_own_owner_frees_the_slot() -> None:
+    """The other way back in: a queue adapter re-dispatches the paused job with
+    the SAME owner token, which re-enters the claim. Once the gate completes, the
+    next ``advance()`` hands out its sibling."""
+    submissions = Submissions()
+    executors = recording([]).bind("human_approval", DurableApproval(submissions))
+    coordinator = Coordinator(graph=paused_gate_graph(), executors=executors, run="owner")
+
+    assert coordinator.advance() == ("t",)
+    coordinator.run_node("t")
+    assert coordinator.advance() == ("gate",)
+    assert coordinator.run_node("gate", owner="worker-1").status == NodeRunStatus.PAUSED
+    assert coordinator.advance() == ()
+
+    submissions.record("gate", True)
+    assert coordinator.run_node("gate", owner="worker-1").status == NodeRunStatus.COMPLETED
+
+    assert coordinator.advance() == ("b",)
+
+
+@pytest.mark.parametrize(
+    ("value", "error"),
+    [
+        (-1, ValueError),
+        (True, TypeError),
+        (False, TypeError),
+        (1.0, TypeError),
+        ("2", TypeError),
+        (None, TypeError),
+    ],
+)
+def test_an_invalid_max_concurrent_is_refused_by_name(value: Any, error: type[Exception]) -> None:
+    """Refused where it is set. Under a serial default, a typo that silently turned
+    a run parallel -- or stalled it -- is the failure to avoid. ``True == 1``, and
+    is still not a count."""
+    with pytest.raises(error, match="max_concurrent"):
+        Coordinator(graph=chain(), executors=recording([]), run="bad", max_concurrent=value)
+
+    with pytest.raises(error, match="max_concurrent"):
+        select_dispatch(("a",), {}, value)
+
+
+def test_select_dispatch_counts_claimed_and_paused_and_never_goes_negative() -> None:
+    state = {
+        "x": NodeState(NodeRunStatus.CLAIMED),
+        "y": NodeState(NodeRunStatus.PAUSED),
+        "z": NodeState(NodeRunStatus.COMPLETED, ports=("out",)),
+        "s": NodeState(NodeRunStatus.SKIPPED),
+        "f": NodeState(NodeRunStatus.FAILED),
+    }
+    assert select_dispatch(("c", "a", "b"), state, 1) == []
+    assert select_dispatch(("c", "a", "b"), state, 3) == ["c"]
+    assert select_dispatch(("c", "a", "b"), state, UNLIMITED_CONCURRENCY) == ["c", "a", "b"]
 
 
 # -- human gates ---------------------------------------------------------

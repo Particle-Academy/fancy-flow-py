@@ -5,8 +5,16 @@ two operations and nothing else:
 
 ``advance()``
     Ask the frontier what is unblocked, settle the skip cascade, and report the
-    ready node ids. A queue adapter dispatches one job per id. A node settled as
+    node ids that may be dispatched NOW. A queue adapter dispatches one job per
+    id, and calls ``advance()`` again whenever a job settles. A node settled as
     skipped gets no job, so its run diagnostics are delivered here instead.
+
+    **Serial by default.** ``max_concurrent`` caps how many of the run's nodes
+    are held -- claimed by a worker, or paused for a person -- at once, and it
+    defaults to ``1``: a node goes on the queue only after the node before it
+    has settled, in declaration order. Pass
+    ``max_concurrent=UNLIMITED_CONCURRENCY`` to hand out the whole ready
+    frontier, or a larger cap. See :mod:`.dispatch`.
 
 ``run_node()``
     Claim one node, replay the graph through the real engine fenced to that
@@ -38,6 +46,7 @@ from ..runtime.identity import RunIdentity
 from ..runtime.options import RunResult
 from ..runtime.pause import Pause, PauseSignal
 from ..schema.graph import FlowEdge, FlowGraph
+from .dispatch import check_max_concurrent, select_dispatch
 from .frontier import Frontier
 from .replay import is_boundary, replay_up_to
 from .retry import RetryPolicy
@@ -102,9 +111,19 @@ class Coordinator:
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     kinds: NodeKindRegistry | None = None
     on_event: Callable[[RunEvent], None] | None = None
+    #: How many of this run's nodes may be HELD at once -- claimed by a worker,
+    #: or paused for a person. ``1``, the default, is serial: :meth:`advance`
+    #: hands out a node only once the one before it has settled.
+    #: ``UNLIMITED_CONCURRENCY`` (``0``) hands out the whole ready frontier.
+    #:
+    #: Refused at construction when negative, a ``bool`` or not an ``int``: under
+    #: a serial default, a typo that silently turned a run parallel is the
+    #: failure to avoid.
+    max_concurrent: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run", RunIdentity.from_value(self.run))
+        check_max_concurrent(self.max_concurrent)
 
     @property
     def run_key(self) -> str:
@@ -119,6 +138,15 @@ class Coordinator:
 
     def advance(self) -> tuple[str, ...]:
         """Which nodes may be dispatched right now.
+
+        The ready frontier, in declaration order, cut to what the run's
+        :attr:`max_concurrent` budget has room for. The budget is measured against
+        nodes already HELD, never the size of one call's batch: with the default
+        of ``1``, a node claimed by a worker -- or paused for a person -- means
+        this returns nothing at all, and whichever job settles next calls it
+        again. A paused gate keeps its slot because a pause does not park the
+        run here, so without it this would hand out the gate's siblings while
+        the person is still deciding.
 
         Also settles the skip cascade, because a skip is a decision the frontier
         just made and a second caller must not make it again.
@@ -135,7 +163,12 @@ class Coordinator:
         frontier = Frontier.compute(self.graph, state)
         settled = Frontier.settle_skips(self.store, self.run_key, frontier.skipped)
         self._deliver_skip_diagnostics(settled, state)
-        return frontier.ready
+
+        # Held work is counted against the state AFTER the skips were written, as
+        # the PHP driver counts it. A skip never takes a slot.
+        if frontier.skipped:
+            state = self.store.state(self.run_key)
+        return tuple(select_dispatch(frontier.ready, state, self.max_concurrent))
 
     def run_node(self, node_id: str, owner: str | None = None) -> NodeOutcome:
         """Claim, execute and checkpoint one node.
@@ -236,6 +269,10 @@ class Coordinator:
 
     def run_to_completion(self, max_passes: int = 10_000) -> DurableRunResult:
         """Drive the graph here, in this process, one node at a time.
+
+        Each pass runs what :meth:`advance` hands out, so under the default
+        serial budget a pass is one node, chosen in declaration order among what
+        is ready at that moment.
 
         Every checkpoint is written exactly as a queued run writes it, so a
         crash mid-loop resumes from the same place a crashed worker would.

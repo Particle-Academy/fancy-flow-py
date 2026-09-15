@@ -35,6 +35,11 @@ class NodeRunStatus:
     #: it will never publish, so its successors skip rather than wait forever.
     SETTLED: Final = (COMPLETED, SKIPPED, FAILED)
 
+    #: A node that occupies one of the run's dispatch slots: a worker holds it,
+    #: or it is parked for a person. A paused gate keeps its slot, so a serial
+    #: run hands out nothing else while the person decides.
+    HELD: Final = (CLAIMED, PAUSED)
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")

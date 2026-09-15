@@ -8,6 +8,66 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-14
+
+### Changed
+
+- **BREAKING: a queued run now dispatches one node at a time.** The durable
+  `Coordinator` takes a `max_concurrent` option, and it defaults to `1`.
+  `advance()` used to return every ready node, and a queue adapter dispatched
+  one job per id, so a trigger fanning out to three nodes put all three on the
+  queue together. Now a node goes on the queue only after the node before it has
+  settled, in the graph's declaration order among what is ready at that moment.
+  `advance()` returns nothing at all while a node of the run is held, and the
+  job that settles it calls `advance()` again. This is the owner's ruling from
+  fancy-flow-php#17, and fancy-flow-php 0.54.0 made the same change.
+
+  **What you must do:** a queued run now dispatches one node at a time; to
+  restore the old behaviour pass `max_concurrent=UNLIMITED_CONCURRENCY`
+  (`from fancy_flow.durable import UNLIMITED_CONCURRENCY`). A positive integer
+  caps how many of one run's nodes are held at once instead. If your adapter
+  already calls `advance()` whenever a job settles, as the docs describe, a
+  serial run needs nothing else.
+  - **"Held" is claimed OR paused.** A node paused for a person keeps its slot.
+    This coordinator does not park the run on a pause, so before this a queue
+    adapter calling `advance()` after a gate paused was handed the gate's ready
+    siblings while the person was still deciding. Under the default it is handed
+    nothing until the gate is resumed. Resuming is unchanged: record the answer
+    and `release()` the paused row, or re-dispatch the paused job with its own
+    owner token. Either one frees the slot.
+  - **The budget counts work already held, not the size of one batch.** A node
+    claimed by a racing worker counts against the cap, so two settles that each
+    call `advance()` cannot each hand out a full quota.
+  - **In-process `run_to_completion` results are unchanged, except for order.**
+    Nodes now run in declaration order among what is ready at each step, instead
+    of batch by batch, so a node that becomes ready runs before an
+    already-waiting sibling declared after it. A run that completes returns the
+    same outputs (every golden fixture still agrees with the single-process
+    run). A run that stops at a pause or a failure may have run a different set
+    of nodes before it stopped.
+  - `max_concurrent` is checked at construction. A negative value raises
+    `ValueError`, and a `bool` or anything that is not an `int` raises
+    `TypeError`. Both messages name `max_concurrent`. A negative limit is not read
+    as unlimited: under a serial default, a typo that quietly made a run
+    parallel is the failure to avoid.
+
+### Added
+
+- `fancy_flow.durable.select_dispatch(ready, state, max_concurrent)`: the pure
+  selection `advance()` uses. It returns every ready id for
+  `UNLIMITED_CONCURRENCY`, and otherwise the first `max_concurrent - held`, in
+  the order given and never fewer than none. Also exported:
+  `fancy_flow.durable.UNLIMITED_CONCURRENCY` (`0`), and
+  `NodeRunStatus.HELD` (`CLAIMED`, `PAUSED`), which `Frontier.has_work_in_flight`
+  now reads too.
+- The `flow/durable-dispatch` conformance suite (14 rows) runs in
+  `tests/conformance/test_durable_dispatch_conformance.py`. It uses the
+  manifest's simulation over this package's own `Frontier.compute` and
+  `select_dispatch`, and passes all 14 rows. The fancy-conformance pin moves from
+  0.24.0 to **v0.25.0**, in `test_pinned_suite_version.py` and in CI's checkout
+  `ref`. 0.25.0 changed no other case, and every other table was re-run against
+  it.
+
 ## [0.22.2] - 2026-09-14
 
 ### Fixed
