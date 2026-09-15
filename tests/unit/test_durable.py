@@ -576,6 +576,36 @@ def test_run_to_completion_takes_the_first_ready_node_in_declaration_order() -> 
     assert result.outputs == {"t": "t", "c": "c", "a": "a", "b": "b"}
 
 
+def test_run_to_completion_allows_a_pass_per_node_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under serial a pass is ONE node, so a flat pass limit is a node limit.
+
+    The default was a flat 10_000, which stopped a serial run of a larger graph
+    short and reported it as unable to progress. Shrunk here so the graph can
+    stay small: four nodes, a floor of two passes.
+    """
+    from fancy_flow.durable import coordinator as coordinator_module
+
+    monkeypatch.setattr(coordinator_module, "DEFAULT_MAX_PASSES", 2)
+    ran: list[str] = []
+    graph = FlowGraph(
+        nodes=tuple(FlowNode(node_id, "rec") for node_id in ("a", "b", "c", "d")),
+        edges=(FlowEdge("e1", "a", "b"), FlowEdge("e2", "b", "c"), FlowEdge("e3", "c", "d")),
+    )
+
+    result = Coordinator(graph=graph, executors=recording(ran), run="passes").run_to_completion()
+
+    assert result.ok, result.error
+    assert ran == ["a", "b", "c", "d"]
+
+    # An explicit limit is still honoured exactly.
+    short = Coordinator(graph=graph, executors=recording([]), run="short").run_to_completion(
+        max_passes=2
+    )
+    assert not short.ok
+
+
 def test_unlimited_dispatches_the_whole_frontier_and_a_cap_of_two_dispatches_two() -> None:
     for limit, expected in ((UNLIMITED_CONCURRENCY, ("a", "b", "c")), (2, ("a", "b"))):
         coordinator = Coordinator(

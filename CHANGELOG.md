@@ -8,6 +8,22 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-09-14
+
+### Fixed
+
+- **`Coordinator.run_to_completion()` no longer stops a serial run of a large
+  graph short.** Its default `max_passes` was a flat `10_000`. Under 0.23.0's
+  serial default each pass runs ONE node, so a graph with more than 10,000
+  runnable nodes ran out of passes and reported "the run cannot progress". The
+  default now allows at least one pass per node (`max(10_000, nodes + 1)`),
+  matching `@particle-academy/fancy-flow` 0.73.0. An explicit `max_passes` is
+  honoured exactly as before. Pinned by
+  `test_run_to_completion_allows_a_pass_per_node_by_default`, which fails
+  against the flat default.
+
+  **What you must do:** nothing.
+
 ## [0.23.0] - 2026-09-14
 
 ### Changed

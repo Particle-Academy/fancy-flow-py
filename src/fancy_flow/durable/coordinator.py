@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 from uuid import uuid4
 
 from ..engine.diagnostics import undelivered_edge_warnings
@@ -53,6 +53,11 @@ from .retry import RetryPolicy
 from .state import InMemoryClaimStore, NodeClaimStore, NodeRunStatus, NodeState
 
 __all__ = ["Coordinator", "DurableRunResult", "NodeOutcome"]
+
+
+#: The fewest passes :meth:`Coordinator.run_to_completion` allows by default.
+#: Raised to one per node for a larger graph -- see that method.
+DEFAULT_MAX_PASSES: Final = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,7 +272,7 @@ class Coordinator:
 
     # -- an in-process driver over the two ------------------------------
 
-    def run_to_completion(self, max_passes: int = 10_000) -> DurableRunResult:
+    def run_to_completion(self, max_passes: int | None = None) -> DurableRunResult:
         """Drive the graph here, in this process, one node at a time.
 
         Each pass runs what :meth:`advance` hands out, so under the default
@@ -284,10 +289,20 @@ class Coordinator:
         idempotent rather than duplicative.
 
         Nothing here sleeps, polls or waits on a person: a paused node RETURNS.
+
+        ``max_passes`` bounds the loop. Unset, it allows at least one pass per
+        node: a serial pass is ONE node, so the flat ``10_000`` this used to
+        default to would stop a serial run of a larger graph short and report
+        it as unable to progress. The TypeScript coordinator defaults the same way.
         """
         pause: PauseSignal | None = None
+        passes = (
+            max_passes
+            if max_passes is not None
+            else max(DEFAULT_MAX_PASSES, len(self.graph.nodes) + 1)
+        )
 
-        for _ in range(max_passes):
+        for _ in range(passes):
             ready = self.advance()
             if not ready:
                 break
