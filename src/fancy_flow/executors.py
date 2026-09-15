@@ -95,6 +95,20 @@ class ExecutorRegistry:
         copy._by_node = dict(self._by_node)
         return copy
 
+    def without_node_bindings(self) -> ExecutorRegistry:
+        """The same registry minus its node-id bindings: what a CHILD graph runs with.
+
+        A node-id binding is addressed to a node of the graph it was bound for.
+        A subflow's child is a different graph, so inheriting those bindings
+        handed a parent's binding to whichever child node shared the id. The
+        durable replay fences every parent node it does not own by id, and since
+        fences stopped aborting (0.22.1) a child node named like one of them was
+        silently fenced. Kind bindings and the fallback still carry down.
+        """
+        copy = self.fork()
+        copy._by_node = {}
+        return copy
+
     # -- lookup ----------------------------------------------------------
 
     def has_kind(self, kind: str) -> bool:

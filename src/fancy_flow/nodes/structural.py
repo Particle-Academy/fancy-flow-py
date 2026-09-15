@@ -185,7 +185,9 @@ class Subflow:
             # host kind resolves at every depth. An explicitly injected
             # registry still wins for a caller that constructed this executor
             # deliberately; the bare builtins remain only as a last resort.
-            getattr(ctx, "executors", None) or self._executors or builtin_executors(self._deps),
+            # Inherited WITHOUT node-id bindings: those name nodes of the parent
+            # graph, and a child node sharing an id is not that node.
+            _child_registry(ctx) or self._executors or builtin_executors(self._deps),
             forward,
             RunOptions(
                 initial_inputs=_child_inputs(config, child, ctx.inputs),
@@ -247,3 +249,9 @@ def _is_intlike(value: Any) -> bool:
     if isinstance(value, str):
         return value.isdigit()
     return False
+
+
+def _child_registry(ctx: Any) -> ExecutorRegistry | None:
+    """The parent's registry for a child run, minus its node-id bindings."""
+    inherited = getattr(ctx, "executors", None)
+    return inherited.without_node_bindings() if inherited is not None else None

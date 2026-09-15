@@ -308,3 +308,26 @@ def test_an_explicit_target_handle_is_not_shadowed_and_gets_no_alias() -> None:
     assert seen["context"] == {"text": "hello"}
     assert "n2" not in seen
     assert "in" not in seen
+
+
+def test_a_child_node_does_not_inherit_a_parent_node_id_binding() -> None:
+    # A node-id binding is addressed to a node OF THE GRAPH it was bound for.
+    # The durable replay binds a fence to every parent node it does not own, by
+    # id; the child inherited the whole registry, so a child node sharing an id
+    # with a parent node ran the parent's fence. Since fences stopped aborting
+    # (0.22.1) that subflow SUCCEEDED with the child's work silently missing.
+    ran: list[str] = []
+    registry = builtin_executors().bind("host_kind", lambda ctx: ran.append("host") or "from-child")
+    fenced = registry.fork().bind_node(
+        "c1", lambda ctx: {"__port": "fancy-flow:fenced", "value": None}
+    )
+
+    set_workflow_resolver(MapResolver({"child": host_kind_graph("c1")}))
+    try:
+        result = FlowRunner().run(subflow_parent(), fenced)
+
+        assert ran == ["host"], "the child's c1 ran the parent's node-id binding"
+        assert result.ok is True
+        assert "from-child" in repr(result.outputs.get("sub"))
+    finally:
+        set_workflow_resolver(None)
