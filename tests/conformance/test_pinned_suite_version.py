@@ -35,10 +35,16 @@ from fancy_conformance import version
 # other table was re-run against a v0.23.0 checkout and printed the counts above,
 # the six skips included -- nothing failed.
 #
+# Moved 0.23.0 -> 0.24.0 on 2026-09-14, in the same change as the fancy-flow#17
+# run diagnostics. 0.24.0 adds flow/run-diagnostics (14 rows: 6 warn, 8 silent),
+# now run by test_run_diagnostics_conformance.py; the engine before the change
+# failed its six warning rows. Every other table was re-run against a v0.24.0
+# checkout and printed the counts above -- nothing failed.
+#
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together, and only after re-running the tables;
 # test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.23.0"
+PINNED_SUITE_VERSION = "0.24.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(

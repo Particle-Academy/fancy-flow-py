@@ -186,12 +186,12 @@ Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
 
 ## Parity is a test result, not a claim
 
-- `tests/conformance/` runs seven tables from `particle-academy/fancy-conformance`:
+- `tests/conformance/` runs eight tables from `particle-academy/fancy-conformance`:
   `shared/expr`, `shared/satisfies-range`, `shared/flow-run-identity`,
-  `flow/entry-points`, `flow/executor-resolution`, `flow/kind-declaration-surface`
-  and `flow/workflow-props`, through that package's own Python loader,
-  `fancy_conformance` (on pytest's `pythonpath` from the envelope checkout; CI
-  sets `PYTHONPATH` to its tag checkout).
+  `flow/entry-points`, `flow/executor-resolution`, `flow/kind-declaration-surface`,
+  `flow/run-diagnostics` and `flow/workflow-props`, through that package's own
+  Python loader, `fancy_conformance` (on pytest's `pythonpath` from the envelope
+  checkout; CI sets `PYTHONPATH` to its tag checkout).
   A missing conformance checkout is a **failure**, never a skip.
   `tests/conformance/test_pinned_suite_version.py` pins the fixture set, and CI
   checks out exactly that tag; a test fails if the pin and the workflow's `ref`

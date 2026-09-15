@@ -12,6 +12,7 @@ from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
 from ..runtime.ports import Port
 from .support import expr
+from .support.routing_diagnostics import warn_if_unresolved
 
 __all__ = ["branch", "for_each", "merge", "switch_case", "transform", "wait"]
 
@@ -24,8 +25,15 @@ def branch(ctx: ExecutionContext) -> Any:
     The incoming value passes through unchanged down whichever side is taken,
     and the other edge stays dead for the rest of the run.
     """
-    resolved = expr.evaluate(ctx.option("condition"), ctx.inputs)
+    condition = ctx.option("condition")
+    resolved = expr.evaluate(condition, ctx.inputs)
     port = "true" if expr.truthy(resolved) else "false"
+
+    # A condition that did not RESOLVE is falsy, so the run takes `false`
+    # silently and for the wrong reason. Routing is unchanged; the reason is
+    # now visible.
+    warn_if_unresolved(ctx, condition, port)
+
     return Port.branch(port, ctx.input("in", ctx.inputs))
 
 
@@ -35,11 +43,18 @@ def switch_case(ctx: ExecutionContext) -> Any:
     Routes on a key: ``value`` is resolved and looked up in the ``cases`` map
     (value -> port id), falling back to ``default``.
     """
-    value = expr.text(expr.evaluate(ctx.option("value"), ctx.inputs))
+    expression = ctx.option("value")
+    value = expr.text(expr.evaluate(expression, ctx.inputs))
     cases = ctx.option("cases", {})
     port = "default"
     if isinstance(cases, dict) and cases.get(value) is not None:
         port = str(cases[value])
+
+    # The same silent mis-route as `branch`, one step over: a `value` that does
+    # not resolve becomes "", matches no case, and falls to `default` --
+    # indistinguishable from a value that genuinely matched nothing.
+    warn_if_unresolved(ctx, expression, port, "value")
+
     return Port.only(port, ctx.input("in", ctx.inputs))
 
 

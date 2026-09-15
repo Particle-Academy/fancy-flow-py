@@ -589,7 +589,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         # ---------------- Logic ----------------
         {
             "name": "branch",
-            # Read from logic.py:29 -- Port.branch(port, ctx.input('in', ctx.inputs)).
+            # Read from logic.py:37 -- Port.branch(port, ctx.input('in', ctx.inputs)).
             "emits": "input",
             "category": "logic",
             "label": "Branch",
@@ -609,7 +609,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "switch_case",
-            # Read from logic.py:43 -- Port.only(port, ctx.input('in', ctx.inputs)).
+            # Read from logic.py:58 -- Port.only(port, ctx.input('in', ctx.inputs)).
             "emits": "input",
             "category": "logic",
             "label": "Switch",
@@ -639,7 +639,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "for_each",
-            # Read from logic.py:63.
+            # Read from logic.py:78.
             "outputShape": [
                 {"path": "items", "type": "array", "description": "The list that was iterated."},
                 {"path": "count", "type": "number", "description": "How many items it held."},
@@ -738,7 +738,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "merge",
-            # logic.py:77-79 -- "merge" unions every dict input at the TOP level;
+            # logic.py:92-94 -- "merge" unions every dict input at the TOP level;
             # "concat" builds a list instead, whose elements are not addressable
             # as fields. So concat declares NOTHING: [] would claim "emits no
             # fields" of a kind that emits a list, which is false and would
@@ -767,7 +767,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "wait",
-            # Read from logic.py:118.
+            # Read from logic.py:133.
             "outputShape": [
                 {"path": "waited", "type": "string", "description": "Which wait mode ran."},
                 {"path": "duration", "type": "number", "description": "How long it waited."},
@@ -804,7 +804,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "transform",
-            # logic.py:129-130 has TWO returns: the input unchanged when no
+            # logic.py:144-145 has TWO returns: the input unchanged when no
             # expression is configured, else the expression's shape. So the
             # RELATION itself depends on config.
             "emits": lambda config: (

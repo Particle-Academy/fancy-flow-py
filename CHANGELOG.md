@@ -8,6 +8,51 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-14
+
+### Added
+
+- **A run now says so when a graph delivers nothing down a path**
+  (fancy-flow#17). Two `log` events at level `warn`, which fancy-flow-php
+  already emitted and this engine did not. Neither changes what runs.
+  - **Undelivered edge.** When a source node has COMPLETED and an edge's
+    `sourceHandle` (default `out`) is not a port that source could ever
+    publish, the run warns against the TARGET node: `Edge e2 reads port
+    "result" from node tf, which never publishes it — nothing would reach o
+    at run time. Available: out. ...`, with detail `{edge, source,
+    sourceHandle}`. The target was skipped, or ran with that input missing,
+    and nothing said so. An untaken branch port never warns: the rule asks
+    whether a port is POSSIBLE, and the possible ports include the ones a
+    node derives from its own config (`switch_case` cases plus `default`,
+    `llm_router` routes plus `fallback`, `subflow`'s `stream`). When the
+    handle is a field of the source's output shape, the message says to read
+    it as `{{ in.<field> }}` instead. The rule lives in the new
+    `fancy_flow.registry.port_resolution.possible_ports`.
+  - **Route taken on an unresolved path.** When `branch` (`condition`) or
+    `switch_case` (`value`) holds a single whole `{{ path }}` that does not
+    resolve against the node's inputs, the node warns that it took `false` /
+    `default` because the value was absent, with detail `{node, configKey,
+    path, tookPort}`. A path that resolves to `None` is resolved and stays
+    silent.
+
+  Pinned by fancy-conformance `flow/run-diagnostics` (14 rows, 6 that warn and
+  8 that must stay silent), whose goldens come from fancy-flow-php.
+
+  **What you must do:** nothing. Routing is unchanged. A host that surfaces
+  warn logs will now see them for graphs that were already broken.
+
+  **Known gap:** the durable `Coordinator` forwards only the events of the node
+  it is running. So an undelivered-edge warning whose target was skipped
+  (the edge was its only inbound one) is emitted during replay but does not
+  reach the host's `on_event`. `FlowRunner.run` delivers all of them.
+
+### Changed
+
+- **Tests pin fancy-conformance 0.24.0** (was 0.23.0), in
+  `test_pinned_suite_version.py` and the CI checkout together, and run its new
+  `flow/run-diagnostics` table. Every other table printed the same counts as
+  before. Test-only: nothing installs it.
+
 ## [0.20.2] - 2026-09-14
 
 ### Fixed

@@ -43,6 +43,7 @@ from typing import Any, cast
 from ..exceptions import RunAborted
 from ..executors import ExecutorRegistry
 from ..registry import kind_id as kid
+from ..registry.port_resolution import possible_ports
 from ..registry.registry import NodeKindRegistry, default_registry, never_executes
 from ..runtime.context import ExecutionContext
 from ..runtime.events import NodeStatus, RunEvent
@@ -198,6 +199,9 @@ class FlowRunner:
         outputs: dict[str, Any] = {}
         #: key: "{node_id}:{port_id}"
         port_values: dict[str, Any] = {}
+        #: Nodes that finished, this run or a resumed one. What separates an
+        #: untaken branch from a port its source can never publish.
+        completed: set[str] = set()
         errors: list[str] = []
         events: list[RunEvent] = []
 
@@ -244,6 +248,9 @@ class FlowRunner:
         declares_props = bool(graph.inputs)
 
         incoming_by_node = _index_incoming(graph.edges)
+        # Built ONCE. Used only to explain an undelivered edge, but building it
+        # per node would make a diagnostic quietly O(n^2) on the hot path.
+        nodes_by_id = {graph_node.id: graph_node for graph_node in graph.nodes}
         start = time.monotonic()
 
         emit(RunEvent.run_start())
@@ -274,7 +281,13 @@ class FlowRunner:
             # primitive every durable driver is built on.
             if node.id in resume_outputs:
                 self._publish(
-                    node, resume_outputs[node.id], outputs, port_values, emit, resumed=True
+                    node,
+                    resume_outputs[node.id],
+                    outputs,
+                    port_values,
+                    completed,
+                    emit,
+                    resumed=True,
                 )
                 continue
 
@@ -294,6 +307,39 @@ class FlowRunner:
             if not incoming and entry_nodes is not None and node.id not in entry_nodes:
                 emit(RunEvent.node_status(node.id, NodeStatus.IDLE, "skipped"))
                 continue
+
+            # AN EDGE THAT DELIVERS NOTHING MUST SAY SO.
+            #
+            # Checked HERE, before the activity gate, because the two outcomes
+            # are both silent and only one reaches `_collect_inputs`. If the bad
+            # edge is a node's only inbound one the node is SKIPPED and never
+            # collects inputs at all; if the node has another live edge it RUNS
+            # with that port simply missing -- and then the downstream template
+            # is completely correct and renders empty, because the payload never
+            # arrived to have a field in it.
+            #
+            # Keyed on the source having COMPLETED, and on the handle not being
+            # a port the source could POSSIBLY publish. A branch that was not
+            # taken is ordinary and must never warn; a source that finished and
+            # cannot publish this port is a misconfiguration that will never
+            # work on any run. "Did it publish?" cannot tell those apart -- both
+            # are absent. A warning that fires on ordinary branching is noise,
+            # and noise is how a real warning stops being read.
+            for edge in incoming:
+                handle = edge.source_handle or "out"
+                if (
+                    _port_key(edge.source, edge.source_handle) not in port_values
+                    and edge.source in completed
+                    and handle not in self._possible_port_ids(nodes_by_id.get(edge.source))
+                ):
+                    emit(
+                        RunEvent.log(
+                            "warn",
+                            self._undelivered_edge_message(edge, node, port_values, nodes_by_id),
+                            node.id,
+                            {"edge": edge.id, "source": edge.source, "sourceHandle": handle},
+                        )
+                    )
 
             # Run once any upstream branch reaches this node. In topological
             # order every upstream node is already settled, so each incoming
@@ -357,7 +403,7 @@ class FlowRunner:
                 emit(RunEvent.log("error", payload, node.id))
                 break
 
-            self._publish(node, payload, outputs, port_values, emit)
+            self._publish(node, payload, outputs, port_values, completed, emit)
             # Success path only, and deliberately so: a stopping message after a
             # failure tells a human the opposite of what happened, in the part
             # of the UI they trust most.
@@ -398,6 +444,7 @@ class FlowRunner:
         result: Any,
         outputs: dict[str, Any],
         port_values: dict[str, Any],
+        completed: set[str],
         emit: EventSink,
         resumed: bool = False,
     ) -> None:
@@ -409,6 +456,7 @@ class FlowRunner:
             port_values[_port_key(node.id, port_id)] = value
             emit(RunEvent.node_output(node.id, port_id, value))
 
+        completed.add(node.id)
         emit(RunEvent.node_status(node.id, NodeStatus.DONE, "resumed" if resumed else None))
 
     def _activated_ports(self, node: FlowNode, result: Any) -> tuple[list[str], Any]:
@@ -451,6 +499,84 @@ class FlowRunner:
         if declared is None:
             return ["out"], result
         return [p.id for p in declared], result
+
+    # -- diagnostics -----------------------------------------------------
+
+    def _undelivered_edge_message(
+        self,
+        edge: FlowEdge,
+        target: FlowNode,
+        port_values: dict[str, Any],
+        nodes_by_id: dict[str, FlowNode],
+    ) -> str:
+        """The message for an edge whose source port publishes nothing.
+
+        Shape agreed with the consumer who reported the defect against the PHP
+        twin, in their order, and each part earns its place:
+
+        1. THE EDGE ID FIRST. The author is looking at a graph, and the edge is
+           the thing they can act on.
+        2. THE CONSEQUENCE, IN RUNTIME TERMS. Without "nothing would reach X"
+           this reads as a schema nit, and a handle string feels cosmetic.
+        3. THE AVAILABLE PORTS -- what the source ACTUALLY published on this
+           run, in publication order, not the kind's declaration, so a
+           config-driven kind reports its real ports.
+        4. THE REMEDY FOR THE COMMON CASE. Nearly every occurrence is an agent
+           ADDING a handle that should not be there, so "leave sourceHandle
+           off" is the fix more often than picking from the list -- and it is
+           offered only when there IS a handle to leave off.
+
+        Plus the part only the engine can supply: when the handle names a FIELD
+        of the source's output shape, say so. That is the actual confusion, and
+        naming it turns a correction into an explanation.
+        """
+        handle = edge.source_handle or "out"
+
+        prefix = f"{edge.source}:"
+        available = [key[len(prefix) :] for key in port_values if key.startswith(prefix)]
+
+        message = (
+            f'Edge {edge.id} reads port "{handle}" from node {edge.source}, which never '
+            f"publishes it \u2014 nothing would reach {target.id} at run time."
+        )
+
+        if available:
+            message += " Available: " + ", ".join(available) + "."
+
+        # The near-miss: a FIELD of that name, where a PORT was expected.
+        source = nodes_by_id.get(edge.source)
+        kind = self._registry().get(source.type) if source is not None and source.type else None
+        fields = kind.output_shape_for(source.config) if kind is not None and source else None
+
+        if isinstance(fields, list):
+            for field in fields:
+                if isinstance(field, dict) and field.get("path") == handle:
+                    message += (
+                        f' Note: "{handle}" is a FIELD this node emits, not a port \u2014 read '
+                        f"it downstream as {{{{ in.{handle} }}}} rather than naming it as a "
+                        "source handle."
+                    )
+                    break
+
+        if edge.source_handle is not None:
+            message += " Leave sourceHandle off to read the node's output."
+
+        return message
+
+    def _possible_port_ids(self, node: FlowNode | None) -> list[str]:
+        """Every port this node COULD publish -- not the ones it did.
+
+        Delegated to :func:`possible_ports` so the config-derived ports of
+        ``switch_case``, ``llm_router`` and ``subflow`` count. Reading only the
+        kind's static declaration would call a third configured case impossible,
+        which is exactly what the PHP twin once did to a graph its own authoring
+        API had invited.
+        """
+        if node is None:
+            return ["out"]
+
+        kind = self._registry().get(node.type) if node.type else None
+        return possible_ports(node, kind, node.config)
 
 
 # -- module-level helpers ------------------------------------------------
