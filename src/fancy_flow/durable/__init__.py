@@ -24,12 +24,13 @@ A queue adapter supplies transport and nothing else.
 from .coordinator import Coordinator, DurableRunResult, NodeOutcome
 from .frontier import Frontier, FrontierResult
 from .human import DurableApproval, DurableUserInput, NotAwaitingHuman, Submissions
-from .replay import BOUNDARY, ReplayResult, is_boundary, replay_up_to
+from .replay import BOUNDARY, FENCE_PORT, ReplayResult, is_boundary, replay_up_to
 from .retry import UNSAFE_TO_REPLAY, RetryPolicy
 from .state import InMemoryClaimStore, NodeClaimStore, NodeRunStatus, NodeState
 
 __all__ = [
     "BOUNDARY",
+    "FENCE_PORT",
     "UNSAFE_TO_REPLAY",
     "Coordinator",
     "DurableApproval",

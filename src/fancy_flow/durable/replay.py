@@ -17,11 +17,35 @@ It replays the graph with :class:`FlowRunner` untouched:
 
 - every node already completed is fed back as ``resume_outputs``, so the engine
   republishes it on the same ports and routes exactly as it did the first time;
-- every node EXCEPT the target is bound, by node id, to a boundary executor
-  that aborts;
+- every node EXCEPT the target is bound, by node id, to a FENCE that runs
+  nothing and publishes only a port no edge reads;
 - so the engine walks its own topological order, skips its own dead branches,
-  collects the target's inputs its own way, runs the target -- and stops at the
-  next thing it would have run.
+  collects the target's inputs its own way, and runs the target.
+
+Why the fence does not stop the walk
+------------------------------------
+
+It used to abort the run. The target's own inputs never depend on a fenced node:
+the frontier dispatches a node only once every source is settled. A COMPLETED
+source is resumed, not fenced. A SKIPPED or FAILED source lit no ports in the
+frontier and lights none in the replay: the engine skips it again or fences it,
+and a fence publishes only a port no edge reads.
+
+But an UNRELATED node can precede the target in topological order, and two
+siblings dispatched together are exactly that. When ``b``'s job started while
+``a`` was still running, the replay aborted at ``a`` and never reached ``b``.
+:meth:`Coordinator.run_node` read "the replay ended without running me" as "the
+engine decided I am unreachable", so ``b`` was recorded skipped, never ran, and
+the run completed as a success.
+
+That needs no second worker. The frontier reports ready nodes in the order the
+graph declares them, while the engine walks siblings in the order their edges
+are listed, so :meth:`Coordinator.run_to_completion` started ``b`` first on any
+graph whose two lists disagree.
+
+Walking past fences makes that inference honest again: when the replay finishes
+without an output for the target, it is because the engine found every inbound
+edge dead.
 
 The target's output is ``result.outputs[node_id]``, and the ports it activated
 arrive as the engine's own ``node-output`` events. Nothing about routing is
@@ -41,7 +65,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Final, NoReturn
+from typing import Any, Final
 
 from ..engine.runner import FlowRunner
 from ..executors import ExecutorRegistry
@@ -50,13 +74,20 @@ from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
 from ..runtime.identity import RunIdentity
 from ..runtime.options import RunOptions, RunResult
+from ..runtime.ports import Port
 from ..schema.graph import FlowGraph
 
-__all__ = ["BOUNDARY", "ReplayResult", "is_boundary", "replay_up_to"]
+__all__ = ["BOUNDARY", "FENCE_PORT", "ReplayResult", "is_boundary", "replay_up_to"]
 
-#: The abort reason the boundary executor uses. Not a failure: it is the engine
-#: telling us it reached a node this job is not responsible for.
+#: The abort reason a boundary used to report. Nothing aborts with it any more
+#: (see "Why the fence does not stop the walk"); :func:`is_boundary` still
+#: recognises it so a caller that checks for it keeps working.
 BOUNDARY: Final = "fancy-flow:node-boundary"
+
+#: The port a fenced node publishes on. No edge reads it, so everything
+#: downstream of a fenced node is dark in the replay -- which never matters to
+#: the target, whose sources are all settled.
+FENCE_PORT: Final = "fancy-flow:fenced"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +103,8 @@ class ReplayResult:
         return self.ports.get(node_id, ())
 
 
-def _boundary(ctx: ExecutionContext) -> NoReturn:
-    ctx.abort(BOUNDARY)
+def _boundary(ctx: ExecutionContext) -> dict[str, Any]:
+    return Port.only(FENCE_PORT)
 
 
 def replay_up_to(
@@ -131,5 +162,5 @@ def replay_up_to(
 
 
 def is_boundary(error: str | None) -> bool:
-    """True when a replay ended because it reached a node it does not own."""
+    """True when a run ended because the replay reached a node it does not own."""
     return error == BOUNDARY

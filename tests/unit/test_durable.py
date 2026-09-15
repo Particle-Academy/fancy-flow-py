@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from fancy_flow import (
+    ExecutionContext,
     ExecutorRegistry,
     FlowEdge,
     FlowGraph,
@@ -392,6 +393,124 @@ def test_the_replay_resolves_ports_against_the_coordinators_registry() -> None:
     assert coordinator.store.state("kinds")["t"].ports == ("yes", "no")
     assert result.ok
     assert result.outputs == {"t": "v", "n": "v"}
+
+
+# -- sibling jobs out of order -------------------------------------------
+
+
+def siblings_graph() -> FlowGraph:
+    """``t`` fans out to ``a`` and ``b``; ``a`` comes first in topological order."""
+    return FlowGraph(
+        nodes=(FlowNode("t", "rec"), FlowNode("a", "rec"), FlowNode("b", "rec")),
+        edges=(FlowEdge("e1", "t", "a"), FlowEdge("e2", "t", "b")),
+    )
+
+
+def test_a_node_whose_earlier_sibling_has_not_finished_runs_instead_of_skipping() -> None:
+    """Siblings that become ready together are dispatched together.
+
+    On real workers nothing orders their jobs: ``b``'s job can start while
+    ``a`` is still running. ``b``'s replay walks the engine's topological order,
+    and ``a`` -- unfinished, so not resumed -- came first. The fence used to
+    ABORT the replay there, and ``run_node`` read "the replay ended without
+    running me" as "the engine decided I am unreachable": ``b`` was recorded
+    SKIPPED, never ran, and the run completed as a success with half its work
+    missing.
+
+    This runs ``b``'s job first, on purpose. The replay reads only completed
+    outputs, so an ``a`` that is claimed and still running looks exactly like
+    this unclaimed one.
+    """
+    ran: list[tuple[str, Any]] = []
+
+    def record(ctx: ExecutionContext) -> str:
+        ran.append((ctx.node.id, ctx.inputs.get("in")))
+        return ctx.node.id
+
+    coordinator = Coordinator(
+        graph=siblings_graph(), executors=ExecutorRegistry().bind("rec", record), run="siblings"
+    )
+
+    assert coordinator.advance() == ("t",)
+    assert coordinator.run_node("t").status == NodeRunStatus.COMPLETED
+    assert coordinator.advance() == ("a", "b")
+
+    outcome = coordinator.run_node("b")
+
+    assert (outcome.status, outcome.error) == (NodeRunStatus.COMPLETED, None)
+    assert coordinator.store.state("siblings")["b"].status == NodeRunStatus.COMPLETED
+    # Its input is its own settled source's, never a fenced sibling's.
+    assert ran == [("t", None), ("b", "t")]
+
+    # The rest drains normally, and every node ran exactly once.
+    result = coordinator.run_to_completion()
+
+    assert result.ok
+    assert result.outputs == {"t": "t", "a": "a", "b": "b"}
+    assert ran == [("t", None), ("b", "t"), ("a", "t")]
+
+
+def test_run_to_completion_runs_siblings_declared_out_of_topological_order() -> None:
+    """The same defect, with no second worker anywhere.
+
+    The frontier reports ready nodes in the order the graph DECLARES them. The
+    engine walks siblings in the order their EDGES are listed. Here ``b`` is
+    declared first and ``a``'s edge is listed first, so ``run_to_completion``
+    started ``b`` while ``a`` had not run. The aborting fence skipped ``b``, and
+    the run returned ``ok`` without it. A graph whose edges were drawn in a
+    different order from its nodes is the ordinary case, not a contrived one.
+    """
+    ran: list[str] = []
+
+    def record(ctx: ExecutionContext) -> str:
+        ran.append(ctx.node.id)
+        return ctx.node.id
+
+    graph = FlowGraph(
+        nodes=(FlowNode("t", "rec"), FlowNode("b", "rec"), FlowNode("a", "rec")),
+        edges=(FlowEdge("e1", "t", "a"), FlowEdge("e2", "t", "b")),
+    )
+    coordinator = Coordinator(
+        graph=graph, executors=ExecutorRegistry().bind("rec", record), run="declared"
+    )
+
+    result = coordinator.run_to_completion()
+
+    assert result.ok
+    assert result.outputs == {"t": "t", "b": "b", "a": "a"}
+    assert sorted(ran) == ["a", "b", "t"]
+
+
+def test_a_target_the_engine_skips_is_recorded_skipped_not_failed() -> None:
+    """The engine's own verdict, whichever node happens to follow the target.
+
+    A replay that finishes without the target's output means the engine found
+    every inbound edge dead. That is a skip, and it was one only by accident:
+    the old fence aborted at the NEXT node, so a dead target with a later node
+    in topological order read as a boundary and was skipped, while a dead
+    target that came LAST finished the replay cleanly and was recorded FAILED.
+    The frontier would not dispatch either; the verdict must not depend on it.
+    """
+    for trailing in (True, False):
+        nodes = [FlowNode("s", "rec"), FlowNode("dead", "rec")]
+        edges = [FlowEdge("e1", "s", "dead", source_handle="never")]
+        if trailing:
+            nodes.append(FlowNode("later", "rec"))
+            edges.append(FlowEdge("e2", "s", "later"))
+
+        coordinator = Coordinator(
+            graph=FlowGraph(nodes=tuple(nodes), edges=tuple(edges)),
+            executors=ExecutorRegistry().bind("rec", lambda ctx: "v"),
+            run=f"dead-{trailing}",
+        )
+        coordinator.run_node("s")
+
+        outcome = coordinator.run_node("dead")
+
+        assert outcome.status == NodeRunStatus.SKIPPED, f"trailing={trailing}"
+        assert (
+            coordinator.store.state(f"dead-{trailing}")["dead"].status == NodeRunStatus.SKIPPED
+        ), f"trailing={trailing}"
 
 
 # -- human gates ---------------------------------------------------------

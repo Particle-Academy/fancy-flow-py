@@ -185,17 +185,23 @@ class Coordinator:
             self.store.pause(self.run_key, node_id, result.error or "")
             return NodeOutcome(node_id, NodeRunStatus.PAUSED, pause=pause, attempt=attempt)
 
-        if is_boundary(result.error):
-            # The engine stopped at a node this job does not own BEFORE reaching
-            # the target -- so the target was never actually unblocked. That is a
-            # frontier bug, not a node failure, and it must not be recorded as
-            # one: a FAILED node settles, and settling it would silently skip
-            # everything downstream.
+        if is_boundary(result.error) or result.ok:
+            # The replay walked the whole graph -- fences publish a dead port
+            # rather than aborting -- and never ran the target. So the engine
+            # decided it was unreachable: every inbound edge dead. The frontier
+            # normally settles that first; honouring the engine's verdict here
+            # too means the two can never disagree about a branch.
+            #
+            # `result.ok` is what reaches this now. While a fence ABORTED, the
+            # verdict depended on which node followed the target: a node after
+            # it read as a boundary, and a dead target that came last finished
+            # cleanly and was recorded FAILED. `is_boundary` is kept so an abort
+            # carrying the old reason still reads as a skip, never a failure.
             self.store.skip(self.run_key, node_id)
             return NodeOutcome(
                 node_id,
                 NodeRunStatus.SKIPPED,
-                error="replay stopped before reaching this node",
+                error="the engine skipped this node: no inbound edge was active",
                 attempt=attempt,
             )
 

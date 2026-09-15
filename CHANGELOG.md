@@ -8,6 +8,64 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-09-14
+
+### Fixed
+
+- **The durable `Coordinator` no longer silently skips a node whose earlier
+  sibling has not finished.** Nodes that become ready together are dispatched
+  together, and on real workers nothing orders their jobs. If `b`'s job started
+  while `a` was still running, `b`'s replay walked the engine's topological
+  order and reached `a` first. `a` was unfinished, so it was fenced, and the
+  fence ABORTED the replay. `Coordinator.run_node` read "the replay ended without
+  running me" as "the engine decided I am unreachable". So `b` was recorded
+  `skipped` and never ran, everything downstream of `b` skipped with it, and the
+  run completed as a success.
+
+  **It needed no second worker.** `Coordinator.advance()` reports ready nodes in
+  the order the graph DECLARES them, and the engine walks siblings in the order
+  their EDGES are listed. So `run_to_completion`, in one process, started `b`
+  first on any graph whose node list and edge list put the siblings in different
+  orders, and returned `ok` without `b`. That is an ordinary graph, not a
+  contrived one.
+
+  A fence now runs nothing and publishes a port no edge reads
+  (`fancy_flow.durable.FENCE_PORT`, `"fancy-flow:fenced"`), and the replay walks
+  on to the target. The target's inputs are unaffected, because the frontier
+  dispatches a node only once every source is settled. This mirrors
+  fancy-flow-php 0.53.1.
+  - **The engine's skip verdict now reads the same wherever the target sits.**
+    A replay that finishes without the target's output means the engine found
+    every inbound edge dead, and `run_node` records it `skipped`. While a fence
+    aborted, the verdict depended on which node came next. A dead target
+    followed by another node was skipped, and a dead target that came last in
+    topological order was recorded `failed`. The frontier dispatches neither,
+    so only a direct `run_node` call could reach this. The outcome's `error`
+    text for the skip now reads "the engine skipped this node: no inbound edge
+    was active" instead of "replay stopped before reaching this node".
+  - **Each job's forwarded `run-end` event now reports `ok: true`.** A job whose
+    target was not last in topological order used to forward `run-end` with
+    `ok: false` to `on_event`, because its replay aborted at the next fence.
+  - `BOUNDARY` and `is_boundary()` are kept and still recognised, so code that
+    checks for them keeps working. Nothing aborts with that reason any more.
+  - Pinned by three tests in `tests/unit/test_durable.py`, all of which failed
+    before this change:
+    `test_a_node_whose_earlier_sibling_has_not_finished_runs_instead_of_skipping`
+    runs `b`'s job first on purpose,
+    `test_run_to_completion_runs_siblings_declared_out_of_topological_order`
+    drives the in-process case, and
+    `test_a_target_the_engine_skips_is_recorded_skipped_not_failed` pins the
+    skip verdict.
+
+  **What you must do:** nothing to upgrade. But a durable run from before this
+  fix that completed successfully may be missing nodes. That applies if a queue
+  adapter dispatched sibling nodes to concurrent workers, and also to
+  `run_to_completion` on a graph whose siblings are declared in a different
+  order from their edges. Look in your `NodeClaimStore` for nodes recorded
+  `skipped` that have an inbound edge from a `completed` source which published
+  the port that edge reads (a `note` is skipped on purpose and does not count).
+  Those nodes never ran, and neither did anything downstream of them.
+
 ## [0.22.0] - 2026-09-14
 
 ### Fixed
