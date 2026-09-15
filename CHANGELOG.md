@@ -8,6 +8,23 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-09-14
+
+### Fixed
+
+- **A subflow's child no longer receives the parent's node-id bindings.** The
+  child ran with the parent's executor registry, node-id bindings included, so
+  a child node that shared an id with a parent node ran the parent node's
+  executor. The durable replay fences every parent node its job does not own,
+  by id. **Since 0.22.1 made fences non-aborting, such a subflow succeeded with
+  that child node's work silently missing.** The child now runs with
+  `ExecutorRegistry.without_node_bindings()`: kind bindings and the fallback
+  still carry down. Mirrors fancy-flow-php 0.53.2.
+
+  **What you must do:** take 0.22.2 if you are on 0.22.1 and run subflows
+  through the durable `Coordinator`. A host `bind_node()` on a parent node id
+  no longer reaches a child node with the same id, which it never should have.
+
 ## [0.22.1] - 2026-09-14
 
 ### Fixed
@@ -909,8 +926,6 @@ exactly; these are the edges that differ.
   The copy still exists only because the promoted `fancy-conformance` Python
   loader is not published on PyPI yet; when it is, this file should be deleted
   rather than maintained.
-
-## [Unreleased]
 
 ## [0.3.0] - 2026-08-24
 
