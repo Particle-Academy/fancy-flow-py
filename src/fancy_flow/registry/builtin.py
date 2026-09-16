@@ -646,7 +646,10 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
             ],
             "category": "logic",
             "label": "For Each",
-            "description": "Publishes the resolved list and its size on BOTH `item` and `done`. Fan-out as DATA, not as jobs -- nothing runs per item.",
+            "description": (
+                "Publishes the resolved list and its size on BOTH `item` and `done`. "
+                "Fan-out as DATA, not as jobs -- nothing runs per item."
+            ),
             "icon": "↻",
             "inputs": [{"id": "in"}],
             "outputs": [{"id": "item", "label": "item"}, {"id": "done", "label": "done"}],
