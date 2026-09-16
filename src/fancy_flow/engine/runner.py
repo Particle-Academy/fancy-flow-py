@@ -433,19 +433,34 @@ class FlowRunner:
         """Record a result, publish it on the activated ports, mark the node done."""
         outputs[node.id] = result
 
-        ports, value = self._activated_ports(node, result)
+        ports, value, per_port = self._activated_ports(node, result)
         for port_id in ports:
-            port_values[_port_key(node.id, port_id)] = value
-            emit(RunEvent.node_output(node.id, port_id, value))
+            # `in per_port`, never `.get(...) or value`: a per-port payload that
+            # is present and None is a payload. Same distinction as `branch`.
+            carried = per_port[port_id] if per_port is not None and port_id in per_port else value
+            port_values[_port_key(node.id, port_id)] = carried
+            emit(RunEvent.node_output(node.id, port_id, carried))
 
         completed.add(node.id)
         emit(RunEvent.node_status(node.id, NodeStatus.DONE, "resumed" if resumed else None))
 
-    def _activated_ports(self, node: FlowNode, result: Any) -> tuple[list[str], Any]:
-        """Which output ports a result activates, and the value carried."""
+    def _activated_ports(
+        self, node: FlowNode, result: Any
+    ) -> tuple[list[str], Any, dict[str, Any] | None]:
+        """Which output ports a result activates, the shared value, and any
+        per-port payloads."""
         if isinstance(result, dict):
             if isinstance(result.get("__port"), str):
-                return [result["__port"]], result.get("value")
+                return [result["__port"]], result.get("value"), None
+            # A CHOSEN SUBSET (#18, reported by MOIC): a LIST lights those ports
+            # with one payload, a MAP gives each lit port its own. An empty one
+            # lights NOTHING, the same answer an explicitly empty `outputs`
+            # gives below.
+            subset = result.get("__ports")
+            if isinstance(subset, Mapping):
+                return [str(p) for p in subset], result.get("value"), dict(subset)
+            if isinstance(subset, (list, tuple)):
+                return [p for p in subset if isinstance(p, str)], result.get("value"), None
             if isinstance(result.get("branch"), str):
                 # `r.value ?? r` on the peer runtimes: an omitted value carries
                 # the whole result object.
@@ -459,7 +474,7 @@ class FlowRunner:
                 # fields no kind declares. The reachable path is an upstream
                 # `transform` whose dot-path did not resolve. All four runtimes
                 # shared this identically, so no parity table could catch it.
-                return [result["branch"]], (value if "value" in result else result)
+                return [result["branch"]], (value if "value" in result else result), None
 
         declared = node.outputs
 
@@ -479,8 +494,8 @@ class FlowRunner:
                 declared = kind_ports
 
         if declared is None:
-            return ["out"], result
-        return [p.id for p in declared], result
+            return ["out"], result, None
+        return [p.id for p in declared], result, None
 
 
 # -- module-level helpers ------------------------------------------------

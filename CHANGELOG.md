@@ -8,6 +8,48 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-16
+
+### Added
+
+- **A node can activate a CHOSEN SUBSET of its output ports** (fancy-flow-php#18,
+  reported by MOIC). The engine knew two answers — `__port` / `branch` lit
+  exactly one port, anything else lit EVERY declared port — so a router matching
+  two of five lanes had to drop the rest of the work or wake lanes nobody asked
+  for.
+
+  `Port.many(["a", "c"], value)` lights those two, each carrying `value`.
+  `Port.many({"a": x, "c": y})` gives each lit port its OWN payload, in the
+  mapping's declaration order. The wire shape is `{"__ports": [...], "value": …}`
+  or `{"__ports": {port: value}}`, read directly by the engine, so a host in
+  another language can emit it without the sugar.
+
+  **An explicitly empty collection lights nothing, deliberately** — the honest
+  answer for a router that matched no rule, and the same answer an explicitly
+  empty `outputs` already gives. A malformed `__ports` (a string, a number)
+  falls through to the every-declared-port rule instead, so a typo cannot
+  silently truncate a run.
+
+  Per-port payloads are read by KEY PRESENCE, not truthiness: a payload that is
+  present and `None` is a payload, the distinction `branch` already had to
+  learn. Nothing about the one-port and every-port rules changed, and a node
+  that never emits `__ports` behaves exactly as before.
+
+  **What you must do:** nothing. This is additive.
+
+- **`flow/port-activation` (12 rows) is asserted here**
+  (`tests/conformance/test_port_activation_conformance.py`). It pins the subset
+  rule, the two single-port rules and the declared-port fallbacks across all
+  four runtimes. Row 0303 is skipped for **node**, not for Python: an explicitly
+  empty `outputs` publishes nothing here, and `@particle-academy/fancy-flow`
+  collapses it to `["out"]`. The summary prints that skip on every run.
+
+### Changed
+
+- **The pinned fixture set moves to `fancy-conformance` 0.27.0**, in
+  `tests/conformance/test_pinned_suite_version.py` and CI's checkout `ref`
+  together. No existing row changed.
+
 ## [0.23.1] - 2026-09-14
 
 ### Fixed
