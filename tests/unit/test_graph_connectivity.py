@@ -254,6 +254,47 @@ def test_an_edge_out_of_a_node_declaring_no_outputs_at_all_is_allowed() -> None:
     )
 
 
+def test_a_declared_port_list_on_the_node_beats_its_kind_through_import() -> None:
+    # The document is more specific than the kind, and now SURVIVES the import.
+    # It did not: `import_workflow` dropped node-level ports, so an `output`
+    # node declaring that it publishes `done` was analysed as a terminator and
+    # this edge was refused. That refusal was correct given the engine would
+    # also have treated the node as terminal -- both halves were wrong together,
+    # which is why neither looked wrong.
+    assert (
+        errors(
+            [
+                node("t", "manual_trigger"),
+                node("out", "output", outputs=[{"id": "done"}]),
+                node("after", "log"),
+            ],
+            [
+                {"id": "e1", "source": "t", "target": "out"},
+                {"id": "e2", "source": "out", "target": "after", "sourceHandle": "done"},
+            ],
+        )
+        == []
+    )
+
+
+def test_an_explicitly_empty_declaration_makes_any_node_a_terminator() -> None:
+    # The other direction of the same three-state field, and the strict reading:
+    # `[]` on the node is an author saying "this publishes nothing", so an edge
+    # leaving it can never deliver -- even though `transform`'s kind declares no
+    # ports at all and would otherwise resolve to `out`.
+    assert "is a TERMINAL node" in messages(
+        [
+            node("t", "manual_trigger"),
+            node("x", "transform", outputs=[]),
+            node("after", "output"),
+        ],
+        [
+            {"id": "e1", "source": "t", "target": "x"},
+            {"id": "e2", "source": "x", "target": "after"},
+        ],
+    )
+
+
 def test_an_edge_from_an_unknown_kind_is_not_refused() -> None:
     # An unregistered kind falls back to `out` in the engine, so it is not a
     # terminator. Using "I do not know" as evidence is the failure this suite

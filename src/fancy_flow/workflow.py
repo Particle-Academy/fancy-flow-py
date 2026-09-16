@@ -16,7 +16,7 @@ from typing import Any, Final
 
 from .analysis.graph_connectivity import check_graph_connectivity
 from .registry.registry import NodeKindRegistry, default_registry
-from .schema.graph import FlowEdge, FlowGraph, FlowNode, WorkflowMetadata
+from .schema.graph import FlowEdge, FlowGraph, FlowNode, PortDescriptor, WorkflowMetadata
 from .schema.issues import ERROR, WARNING, ImportIssue, ImportResult
 
 __all__ = [
@@ -199,9 +199,21 @@ def import_workflow(
             width=float(raw["width"]) if raw.get("width") is not None else None,
             height=float(raw["height"]) if raw.get("height") is not None else None,
             style=dict(raw["style"]) if isinstance(raw.get("style"), dict) else None,
-            # inputs/outputs intentionally left None on import - the engine then
-            # falls back to the kind's ports, or a single `out`, matching the
-            # TypeScript import.
+            # Declared ports, READ rather than dropped. The comment that stood
+            # here said they were left None "matching the TypeScript import",
+            # and that was measurably false: the TypeScript importer carries a
+            # document's ports onto `data.outputs`, and its EXPORTER writes them
+            # precisely so a runtime in another language does not have to guess
+            # at a config-derived port set it cannot compute (`switch_case`
+            # cases, `llm_router` routes).
+            #
+            # So the one field written FOR this runtime was the one field this
+            # runtime threw away, and the fallback quietly substituted the
+            # kind's placeholder ports -- `case_a`, `case_b` -- for the node's
+            # real ones. Nothing failed; the diagnostics simply named ports the
+            # node did not have.
+            inputs=_ports_from(raw.get("inputs")),
+            outputs=_ports_from(raw.get("outputs")),
         )
         nodes.append(node)
         node_ids.add(node.id)
@@ -341,6 +353,33 @@ def _opt(value: Any) -> str | None:
     return None if value is None else str(value)
 
 
+def _ports_from(raw: Any) -> tuple[PortDescriptor, ...] | None:
+    """Read a declared port list, preserving the three-state distinction.
+
+    An absent key stays ``None`` so the engine falls back to the kind's ports.
+    An empty list stays EMPTY -- it is a node saying "no ports", which is a
+    different claim from saying nothing, and collapsing the two is the bug this
+    helper exists to avoid repeating.
+
+    Both spellings an editor emits are accepted: a ``{"id": ..., "label": ...}``
+    object and a bare string. A malformed entry is skipped rather than failing
+    the import, because a document that is otherwise readable should still run
+    -- and a port that then goes missing is named by the undelivered-edge
+    warning rather than swallowed.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+
+    ports: list[PortDescriptor] = []
+    for port in raw:
+        if isinstance(port, str):
+            ports.append(PortDescriptor(port))
+        elif isinstance(port, dict) and isinstance(port.get("id"), (str, int, float)):
+            ports.append(PortDescriptor.from_dict(port))
+
+    return tuple(ports)
+
+
 def _node_to_schema(node: FlowNode) -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": node.id,
@@ -372,6 +411,14 @@ def _node_to_schema(node: FlowNode) -> dict[str, Any]:
         out["height"] = node.height
     if node.style:
         out["style"] = node.style
+    # Declared ports, written back. Guarded on `is not None`, NEVER on
+    # truthiness: an empty list is a node saying "no output ports", and omitting
+    # it would export that as "not declared" -- silently turning the strict
+    # state into the fallback one on the next import. This pair with
+    # `_ports_from` is what makes the three states survive a save.
+    for key, ports in (("inputs", node.inputs), ("outputs", node.outputs)):
+        if ports is not None:
+            out[key] = [p.to_dict() for p in ports]
     return out
 
 

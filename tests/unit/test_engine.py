@@ -213,29 +213,78 @@ def test_the_kind_ports_fallback_applies_when_a_node_declares_none() -> None:
     assert published == ["left", "right"]
 
 
-def test_an_empty_kind_port_list_is_not_adopted() -> None:
-    """A terminal KIND must not cut every chain through it.
+def test_an_empty_kind_port_list_publishes_nothing_and_says_so() -> None:
+    """A terminal KIND terminates, and the cut announces itself.
 
-    The kind declares `outputs: []`, meaning "terminal on the canvas". Consuming
-    that literally as the fallback would publish zero ports where the historical
-    fallback published `out`.
+    The kind declares `outputs: []`, meaning "terminal on the canvas", and that
+    is now honoured literally.
+
+    This test asserted the OPPOSITE until the strict reading landed: the empty
+    list was refused and the node published `out`, so a chain continued straight
+    through a node that had declared it publishes nothing. That protection
+    existed because the alternative was a SILENT cut. The ruling was
+    strict-but-loud, so the cut now happens AND is reported, and both halves are
+    asserted here -- a test that only checked `ran` would pass against an engine
+    that truncated in silence, which is the one failure this change was allowed
+    to introduce only because it does not.
     """
     registry = NodeKindRegistry().register(
         NodeKind(name="terminal_kind", category="output", label="T", outputs=())
     )
+    ran: list[str] = []
     published: list[str] = []
+    warnings: list[RunEvent] = []
 
     def sink(event: RunEvent) -> None:
         if event.type == RunEvent.NODE_OUTPUT:
             published.append(str(event.port_id))
+        if event.type == RunEvent.LOG and event.level == "warn":
+            warnings.append(event)
 
-    FlowRunner(kinds=registry).run(
-        graph([FlowNode("n", "terminal_kind")]),
+    result = FlowRunner(kinds=registry).run(
+        graph(
+            [FlowNode("t", "terminal_kind"), FlowNode("next", "plain")],
+            [FlowEdge("e1", "t", "next")],
+        ),
+        ExecutorRegistry()
+        .bind("terminal_kind", lambda ctx: 1)
+        .bind("plain", lambda ctx: ran.append("next")),
+        sink,
+    )
+
+    assert result.ok
+    assert published == []
+    assert ran == [], "nothing downstream of a terminal node may run"
+
+    assert len(warnings) == 1
+    assert warnings[0].message is not None
+    assert 'Edge e1 reads port "out" from node t' in warnings[0].message
+    assert warnings[0].detail == {"edge": "e1", "source": "t", "sourceHandle": "out"}
+
+
+def test_a_terminal_kind_with_nothing_downstream_stays_silent() -> None:
+    """The other half, and the reason the warning is keyed on the EDGE.
+
+    A terminal node at the end of a chain is the normal case and must not warn.
+    A diagnostic that fires on correct graphs is how a real one stops being read.
+    """
+    registry = NodeKindRegistry().register(
+        NodeKind(name="terminal_kind", category="output", label="T", outputs=())
+    )
+    warnings: list[RunEvent] = []
+
+    def sink(event: RunEvent) -> None:
+        if event.type == RunEvent.LOG and event.level == "warn":
+            warnings.append(event)
+
+    result = FlowRunner(kinds=registry).run(
+        graph([FlowNode("t", "terminal_kind")]),
         ExecutorRegistry().bind("terminal_kind", lambda ctx: 1),
         sink,
     )
 
-    assert published == ["out"]
+    assert result.ok
+    assert warnings == []
 
 
 @pytest.mark.parametrize("kind_id", ["note", "@particle-academy/note", "@fancy/note"])

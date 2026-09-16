@@ -27,24 +27,34 @@ from .test_graph_fixtures import _normalize
 FIXTURES = sorted((Path(__file__).parent / "fixtures").glob("*.json"))
 
 
-def _graph(doc: dict[str, Any]):
-    registry = builtin.register(NodeKindRegistry(), with_structural=True)
-    return import_workflow(doc["schema"], lenient=True, registry=registry).graph
+def _registry() -> NodeKindRegistry:
+    return builtin.register(NodeKindRegistry(), with_structural=True)
+
+
+def _graph(doc: dict[str, Any], registry: NodeKindRegistry | None = None):
+    return import_workflow(doc["schema"], lenient=True, registry=registry or _registry()).graph
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)
 def test_durable_driver_agrees_with_the_single_process_run(path: Path) -> None:
     doc = json.loads(path.read_text(encoding="utf-8"))
-    graph = _graph(doc)
+    # Both drivers are handed the SAME explicit registry, as the golden harness
+    # next door is. Leaving them both on the shared one made them agree for the
+    # uninteresting reason -- they inherited whatever an earlier test file had
+    # registered into it -- so a disagreement that only appears with the kinds
+    # resolved could never surface here.
+    registry = _registry()
+    graph = _graph(doc, registry)
     initial = doc.get("initialInputs", {})
 
-    single = FlowRunner().run(
+    single = FlowRunner(registry).run(
         graph, builtin.executors(), options=RunOptions(initial_inputs=initial)
     )
 
     durable = Coordinator(
         graph=graph,
         executors=builtin.executors(),
+        kinds=registry,
         run=path.stem,
         initial_inputs=initial,
     ).run_to_completion()

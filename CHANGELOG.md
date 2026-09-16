@@ -8,6 +8,79 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-16
+
+**BREAKING (behaviour): a node that declares NO output ports now publishes
+nothing, and a chain it cuts says so. A terminal node can finally terminate.**
+
+### Fixed
+
+- **`import_workflow()` now READS a node's declared `inputs` / `outputs`, and
+  `export_workflow()` writes them back** (fancy-flow-php#20). They were dropped,
+  with a comment claiming it matched the TypeScript importer — measurably false:
+  the TypeScript importer carries a document's ports onto `data.outputs`, and
+  its exporter writes them **precisely so a runtime in another language does not
+  have to guess at a config-derived port set it cannot compute** (`switch_case`
+  cases, `llm_router` routes).
+
+  So the one field written *for* this runtime was the one field it threw away,
+  and the fallback quietly substituted the kind's **placeholder** ports for the
+  node's real ones. Nothing failed; the diagnostics simply named ports the node
+  did not have.
+
+  `fancy-flow-php` and `fancy-flow` (Rust) had the identical gap and are fixed
+  in the same release. Three states survive the round trip: absent means "not
+  declared", `[]` means "explicitly no ports", a list means those ports. Both
+  spellings are read — a `{"id": …}` object and a bare string — and a malformed
+  entry is skipped rather than failing the import.
+
+### Changed
+
+- **An empty output declaration means NO PORTS — from the node OR from the
+  kind.** `_activated_ports` refused an empty list coming from a kind and
+  published `out` instead, so a terminal kind (`log`, `output`) could never
+  actually terminate and a chain ran straight through it.
+
+  That refusal was defensible while the alternative was a SILENT cut. The ruling
+  is **strict, but a terminal node must be loud**, so the cut now happens and
+  announces itself.
+
+  **What you must DO:** if a graph deliberately chains *through* a `log` or
+  `output` node, or through any node declaring `outputs: []`, that chain now
+  stops — and the run tells you which edge died. Give the node real output
+  ports, or route around it.
+
+- **`possible_ports()` honours the empty declaration too, and that is what makes
+  the above safe.** It had the SAME empty-to-`out` collapse, in the other of the
+  two gates that shape a port set. Fixing only the runner would have been half a
+  fix and the dangerous half: the node would publish nothing while this lookup
+  still reported `out` as deliverable, leaving the undelivered-edge warning
+  **silent for exactly the edge that had just stopped delivering**.
+
+  A terminal node with nothing downstream stays silent — the warning is keyed on
+  the EDGE, because a diagnostic that fires on correct graphs is how a real one
+  stops being read.
+
+- **The pinned fixture set moves to `fancy-conformance` 0.29.0**, in the test
+  constant and CI's checkout `ref` together.
+
+### Fixed (test harness)
+
+- **The parity harness no longer depends on test-execution ORDER.**
+  `test_graph_fixtures.py` passed the kind registry to the importer only and ran
+  `FlowRunner()` against the shared registry, justified by a comment saying PHP
+  "leaves the shared registry empty". That is false about PHP:
+  `NodeKindRegistry::default()` populates itself with the builtins on first
+  touch, so PHP's runner has always resolved every kind.
+
+  Python's shared registry starts empty and was only populated as a **side
+  effect** of earlier test files calling `builtin.register()` — so the same
+  fixture gave different answers under `pytest` and under
+  `pytest tests/parity`. The registry is now passed explicitly, here and in
+  `test_durable_driver_parity.py`, which had the same implicit dependency. All
+  23 fixtures were checked under both configurations; only
+  `03-branch-false-log` differs, so nothing else changed behaviour.
+
 ## [0.24.0] - 2026-09-16
 
 ### Added

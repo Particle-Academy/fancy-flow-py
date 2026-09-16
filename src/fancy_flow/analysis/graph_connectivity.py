@@ -151,10 +151,11 @@ def _is_terminator(node: FlowNode, registry: NodeKindRegistry) -> bool:
     # said what this node publishes is believed -- the same way the engine
     # believes it.
     #
-    # Reachable only for a hand-built graph here: `import_workflow` drops
-    # node-level ports (as the PHP twin does, and unlike the TypeScript one,
-    # which preserves them). A real divergence between the importers, recorded
-    # rather than smoothed over.
+    # This used to be reachable only for a hand-built graph, because
+    # `import_workflow` dropped node-level ports. It no longer does, so an
+    # authored declaration now reaches this check and the engine alike -- which
+    # is the point: a validator that refused an edge the engine would have
+    # delivered on would be promising the opposite of the runtime.
     if node.outputs is not None:
         return len(node.outputs) == 0
 

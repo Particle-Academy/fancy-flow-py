@@ -63,7 +63,17 @@ def possible_ports(
     if derived:
         return derived
 
-    return declared or ["out"]
+    # An empty declaration means NO PORTS, and it has to mean that here as well
+    # as in `_activated_ports`. This line read `declared or ["out"]` until now
+    # -- the same empty-to-`out` collapse the runner used to make, in the other
+    # of the two gates that shape a port set.
+    #
+    # Fixing only the runner would have been half a fix, and the dangerous half:
+    # the node would publish nothing while this lookup still reported `out` as
+    # deliverable, so the undelivered-edge warning would stay SILENT for exactly
+    # the edge that had just stopped delivering. The ruling was
+    # strict-but-LOUD, and the loudness lives here.
+    return declared
 
 
 def _config_derived(bare_kind: str, config: dict[str, Any], declared: list[str]) -> list[str]:

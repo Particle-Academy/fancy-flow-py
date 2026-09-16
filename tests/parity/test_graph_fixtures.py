@@ -23,15 +23,24 @@ FIXTURES = sorted((Path(__file__).parent / "fixtures").glob("*.json"))
 
 
 def _run(doc: dict[str, Any]) -> tuple[bool, dict[str, Any], str | None]:
-    # A LOCAL kind registry, exactly as the PHP harness does, which leaves the
-    # shared registry empty. That matters: the engine's declared-output-port
-    # fallback reads the shared registry, so a populated one would give
-    # `for_each` its `item`/`done` ports instead of the historical lone `out`.
-    # Populating it here would make these goldens agree with a configuration
-    # the PHP suite never runs. The fallback gets its own unit test instead.
+    # A LOCAL kind registry, handed to BOTH the importer and the runner.
+    #
+    # This used to pass it to the importer only, on the stated grounds that the
+    # PHP harness "leaves the shared registry empty" -- which is measurably
+    # false: `NodeKindRegistry::default()` over there populates itself with the
+    # builtins on first touch, so PHP's `new FlowRunner()` has always resolved
+    # every kind in these fixtures. Ours resolves none of them, and the
+    # declared-output-port fallback reads exactly that registry.
+    #
+    # The two answers differ for `03-branch-false-log`, whose `log` node
+    # terminates only when the runner can see that `log` declares no ports. The
+    # golden was therefore decided by whether some EARLIER test file had called
+    # `builtin.register()` and populated the shared registry as a side effect --
+    # green under `pytest`, red under `pytest tests/parity`. Passing the
+    # registry states the configuration instead of inheriting it.
     registry = builtin.register(NodeKindRegistry(), with_structural=True)
     result = import_workflow(doc["schema"], lenient=True, registry=registry)
-    run = FlowRunner().run(
+    run = FlowRunner(registry).run(
         result.graph,
         builtin.executors(),
         options=RunOptions(initial_inputs=doc.get("initialInputs", {})),

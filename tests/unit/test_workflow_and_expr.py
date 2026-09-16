@@ -13,6 +13,7 @@ from fancy_flow import (
     FlowGraph,
     FlowNode,
     NodeKindRegistry,
+    PortDescriptor,
     WorkflowMetadata,
     builtin,
     export_workflow,
@@ -88,12 +89,12 @@ def test_a_dangling_edge_is_dropped_with_a_warning_not_kept() -> None:
     assert any("not found" in i.message for i in result.warnings())
 
 
-def test_import_leaves_node_ports_undeclared() -> None:
+def test_a_node_that_declares_no_ports_imports_as_undeclared() -> None:
     """`None`, not `()`.
 
     The engine's fallback -- kind ports, then a lone `out` -- depends on the
-    distinction, and baking `()` in at import would make every imported node
-    terminal.
+    distinction, and baking `()` in for a document that says nothing would make
+    every imported node terminal.
     """
     doc = {
         "version": 1,
@@ -111,6 +112,60 @@ def test_import_leaves_node_ports_undeclared() -> None:
     }
     node = import_workflow(doc, registry=registry()).graph.nodes[0]
     assert node.outputs is None
+
+
+def test_declared_ports_survive_a_round_trip_including_an_empty_list() -> None:
+    """The three states have to survive export -> import.
+
+    The importer used to drop `inputs`/`outputs` outright, so an author's
+    declaration never reached the engine and the kind's placeholder ports were
+    substituted for the node's real ones. Now they are read -- and the exporter
+    has to write them back on the same terms, or the strict reading is only
+    strict until a graph is saved: an empty list exported as "absent" becomes
+    the FALLBACK state on the next read, which is the collapse this whole pair
+    exists to prevent.
+    """
+    doc = {
+        "version": 1,
+        "graph": {
+            "nodes": [
+                # Declared: two ports, one of them an editor's bare-string form.
+                {
+                    "id": "a",
+                    "kind": "log",
+                    "position": {"x": 0, "y": 0},
+                    "outputs": [{"id": "done", "label": "Done"}, "extra"],
+                },
+                # Explicitly none.
+                {"id": "b", "kind": "log", "position": {"x": 0, "y": 0}, "outputs": []},
+                # Undeclared.
+                {"id": "c", "kind": "log", "position": {"x": 0, "y": 0}},
+                # Malformed entries are skipped, not fatal -- the rest of the
+                # list, and of the node, is perfectly readable.
+                {
+                    "id": "d",
+                    "kind": "log",
+                    "position": {"x": 0, "y": 0},
+                    "outputs": [{}, 7.5, {"id": "ok"}],
+                },
+            ],
+            "edges": [],
+        },
+    }
+
+    nodes = {n.id: n for n in import_workflow(doc, lenient=True, registry=registry()).graph.nodes}
+
+    assert nodes["a"].outputs == (PortDescriptor("done", "Done"), PortDescriptor("extra"))
+    assert nodes["b"].outputs == ()
+    assert nodes["c"].outputs is None
+    assert nodes["d"].outputs == (PortDescriptor("ok"),), "the good entry survives its neighbours"
+
+    graph = import_workflow(doc, lenient=True, registry=registry()).graph
+    exported = {n["id"]: n for n in export_workflow(graph)["graph"]["nodes"]}
+
+    assert exported["a"]["outputs"] == [{"id": "done", "label": "Done"}, {"id": "extra"}]
+    assert exported["b"]["outputs"] == [], "an explicit `[]` is written, not omitted"
+    assert "outputs" not in exported["c"], "an undeclared list stays undeclared"
 
 
 def test_defaults_are_applied_only_when_config_is_absent() -> None:

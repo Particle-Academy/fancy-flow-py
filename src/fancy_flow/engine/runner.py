@@ -485,13 +485,19 @@ class FlowRunner:
         # the document. This covers hand-written schemas that omit them.
         if declared is None and node.type is not None:
             kind = self._registry().get(node.type)
-            kind_ports = kind.outputs if kind is not None else None
-            # Only adopt NON-EMPTY kind ports. A terminal kind (category
-            # "output") declares an empty list, and consuming that literally
-            # would publish zero ports where the historical fallback published
-            # `out` -- silently cutting every chain through such a node.
-            if kind_ports:
-                declared = kind_ports
+            # The KIND's ports, INCLUDING an empty list. An empty one was
+            # refused here until now, because consuming it literally publishes
+            # zero ports where the historical fallback published `out` -- and
+            # that silently cut every chain through such a node.
+            #
+            # The protection is gone because the SILENCE is gone: an edge
+            # leaving a node that published nothing now raises the
+            # undelivered-edge warning, so a truncated chain announces itself
+            # instead of being papered over with a port the node never
+            # declared. Keeping the refusal as well would mean a terminal kind
+            # could never actually terminate -- and the ruling was
+            # strict-but-loud, not lenient.
+            declared = kind.outputs if kind is not None else None
 
         if declared is None:
             return ["out"], result, None
