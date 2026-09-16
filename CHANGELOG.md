@@ -8,6 +8,44 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-16
+
+### Fixed
+
+- **A human gate inside a `subflow` can be answered again** (fancy-flow-php#21).
+  `subflow` wrapped every unsuccessful child run as
+  `subflow "x" failed: <reason>` — and a **pause travels that same channel**.
+  `Pause.decode` is prefix-anchored, so a `human_approval` or `user_input` one
+  level down produced:
+
+  ```
+  subflow "child" failed: fancy-flow:pause:{"nodeId":"gate",...}
+  ```
+
+  which does not decode. Three things followed, none of them loud:
+
+  1. The durable coordinator read a **FAILED run** rather than one parked on a
+     person, so **the gate could never be answered** — the run was unresumable.
+  2. It was reported as an error, so retry policy counted someone's pending
+     decision as a fault and burned attempts against a human being's lunch break.
+  3. The run looked finished and failed, which is the quiet kind of wrong.
+
+  A decodable pause now travels untouched; a genuine failure still carries the
+  `subflow "x" failed:` prefix, because naming which child failed is real
+  context worth keeping.
+
+  **`fancy-flow` (Rust) never had this** and carries a comment at the same line
+  saying why. `fancy-flow-php` and `@particle-academy/fancy-flow` both did, and
+  are fixed in the same release.
+
+  **What you must do:** nothing. A parked run previously recorded as a failed
+  subflow was never resumable and will need re-running.
+
+  Pinned by `tests/unit/test_subflow_propagates_a_pause.py`, which asserts the
+  pause **DECODES** — never its text, since the reason is verbatim by contract
+  and a test pinned to the wording would pass against the very decoration it
+  exists to stop. Verified to fail against 0.25.0.
+
 ## [0.25.0] - 2026-09-16
 
 **BREAKING (behaviour): a node that declares NO output ports now publishes

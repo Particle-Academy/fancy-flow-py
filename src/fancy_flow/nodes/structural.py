@@ -17,6 +17,7 @@ from ..registry.registry import NodeKindRegistry
 from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
 from ..runtime.options import RunOptions
+from ..runtime.pause import Pause
 from ..runtime.ports import Port
 from ..schema.graph import FlowGraph, PortDescriptor
 from .support.deps import ExecutorDeps
@@ -203,7 +204,26 @@ class Subflow:
         )
 
         if not result.ok:
-            ctx.abort(f'subflow "{ref}" failed: {result.error or "unknown error"}')
+            reason = result.error or "unknown error"
+
+            # A PAUSE IS NOT A FAILURE, and it travels this same channel.
+            #
+            # Every unsuccessful child run used to be wrapped as
+            # ``subflow "x" failed: <reason>``. ``Pause.decode`` is
+            # prefix-anchored, so a ``human_approval`` or ``user_input`` one
+            # level down produced a string that no longer decoded: the durable
+            # coordinator read a FAILED run instead of a run parked on a
+            # person, the gate became unresumable, and retry policy counted
+            # someone's pending decision as a fault.
+            #
+            # The Rust twin never had this and says why at the same line; this
+            # runtime, PHP and TypeScript all did.
+            if Pause.decode(reason) is not None:
+                ctx.abort(reason)
+
+            # A genuine failure still names the subflow. That context is worth
+            # keeping; it is only the pause that must travel untouched.
+            ctx.abort(f'subflow "{ref}" failed: {reason}')
 
         # `stream` alone still emits a final value on `stream` so downstream
         # nodes have something to run on; `both` publishes on every port.
