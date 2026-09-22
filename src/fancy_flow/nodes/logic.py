@@ -6,6 +6,7 @@ which port lights up. See ``.ai/knowledge/flow-engine-spec.md`` section 4.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from ..runtime.context import ExecutionContext
@@ -20,6 +21,21 @@ if TYPE_CHECKING:
 __all__ = ["branch", "for_each", "merge", "switch_case", "transform", "wait"]
 
 
+def _validate_routing_expression(ctx: ExecutionContext, value: Any, kind: str, field: str) -> None:
+    """Validate routing fields without changing ordinary literal configuration."""
+    if not isinstance(value, str) or not value.strip():
+        return
+    bare = value.strip()
+    subject = f'{kind} "{ctx.node.id}" {field} "{bare}"'
+    if "{{" not in value:
+        ctx.abort(f"{subject} is not an expression -- wrap it: {{{{ {bare} }}}}")
+    opened = 0
+    for delimiter in re.findall(r"\{\{|\}\}", value):
+        opened = opened + 1 if delimiter == "{{" else max(0, opened - 1)
+    if opened:
+        ctx.abort(subject + " has an unclosed expression -- close every {{ with }}")
+
+
 def branch(ctx: ExecutionContext) -> Any:
     """``branch`` -- two ports, exactly one taken.
 
@@ -29,6 +45,7 @@ def branch(ctx: ExecutionContext) -> Any:
     and the other edge stays dead for the rest of the run.
     """
     condition = ctx.option("condition")
+    _validate_routing_expression(ctx, condition, "branch", "condition")
     resolved = expr.evaluate(condition, ctx.inputs)
     port = "true" if expr.truthy(resolved) else "false"
 
@@ -47,6 +64,7 @@ def switch_case(ctx: ExecutionContext) -> Any:
     (value -> port id), falling back to ``default``.
     """
     expression = ctx.option("value")
+    _validate_routing_expression(ctx, expression, "switch_case", "value")
     value = expr.text(expr.evaluate(expression, ctx.inputs))
     cases = ctx.option("cases", {})
     port = "default"

@@ -602,6 +602,10 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
                     "type": "expression",
                     "key": "condition",
                     "label": "Condition",
+                    "description": (
+                        "String values must be {{ }}-wrapped expressions; "
+                        "bare strings and unclosed templates abort the run."
+                    ),
                     "example": "{{ $json.active }}",
                     "required": True,
                 }
@@ -626,6 +630,10 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
                     "type": "expression",
                     "key": "value",
                     "label": "Switch on",
+                    "description": (
+                        "String values must be {{ }}-wrapped expressions; "
+                        "bare strings and unclosed templates abort the run."
+                    ),
                     "example": "{{ $json.kind }}",
                     "required": True,
                 },
