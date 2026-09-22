@@ -6,13 +6,16 @@ which port lights up. See ``.ai/knowledge/flow-engine-spec.md`` section 4.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
 from ..runtime.ports import Port
 from .support import expr
 from .support.routing_diagnostics import warn_if_unresolved
+
+if TYPE_CHECKING:
+    from ..executors import ExecutorRegistry
 
 __all__ = ["branch", "for_each", "merge", "switch_case", "transform", "wait"]
 
@@ -177,6 +180,19 @@ def for_each(ctx: ExecutionContext) -> Any:
             f"exceeds its maxItems cap of {max_items}"
         )
 
+    # The lane runs on the registry MINUS its node-id bindings, as a subflow
+    # child does. A node-id binding addresses a node of the graph it was bound
+    # for, and a lane node IS a node of that graph -- so the durable driver's
+    # replay fences, bound by id to every node but the one it runs, matched every
+    # lane node. 0.27.0 shipped that: a durable run reported `ok` with each lane
+    # result a fence marker. fancy-flow-php's ForEachExecutor strips them too.
+    # No registry is not a lane of defaults: the lane is the HOST's nodes, and
+    # running them on anything else would report their work as done. PHP throws
+    # here for the same reason.
+    if ctx.executors is None:
+        ctx.abort(f'for_each "{ctx.node.id}" has an item lane but no executor registry to run it')
+    lane_executors: ExecutorRegistry = ctx.executors.without_node_bindings()
+
     results: list[Any] = []
     failures: list[dict[str, Any]] = []
 
@@ -187,7 +203,7 @@ def for_each(ctx: ExecutionContext) -> Any:
 
         nested = FlowRunner().run(
             lane_graph,
-            ctx.executors,
+            lane_executors,
             None,
             RunOptions(
                 initial_inputs=initial_inputs,

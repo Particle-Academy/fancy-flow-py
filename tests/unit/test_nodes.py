@@ -483,3 +483,16 @@ def test_the_done_tail_receives_the_aggregate() -> None:
         "failures": [],
         "count": 2,
     }
+
+
+def test_a_lane_with_no_executor_registry_aborts_by_name() -> None:
+    # The lane is the HOST's nodes. Running them on the bare builtins instead
+    # would report work as done that never ran, so this refuses by name.
+    from fancy_flow.exceptions import RunAborted
+
+    graph = _lane_graph({"source": "{{ in.rows }}"})
+    node = next(n for n in graph.nodes if n.id == "fe")
+    ctx = ExecutionContext(node, {"in": {"rows": ["a"]}}, lambda _e: None, graph=graph)
+
+    with pytest.raises(RunAborted, match="no executor registry"):
+        logic.for_each(ctx)

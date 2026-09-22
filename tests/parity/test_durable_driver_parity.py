@@ -166,3 +166,56 @@ def test_a_completed_node_is_republished_not_re_executed() -> None:
 
     assert calls == ["a"], "the upstream node ran exactly once"
     assert seen == [{"n": 1}], "the downstream node saw the republished checkpoint"
+
+
+def test_a_for_each_lane_runs_real_executors_not_the_replays_fences() -> None:
+    """The fence must not reach a ``for_each`` lane.
+
+    The durable driver executes one node by replaying the graph with every OTHER
+    node bound, by id, to a fence that succeeds with a marker port. ``for_each``
+    runs its ``item`` lane through ``ctx.executors`` -- and a lane node is a
+    node of the SAME graph, so every one of them matched a fence. 0.27.0 shipped
+    that: the durable run reported ``ok`` with each lane result a fence marker,
+    while the single-process run of the same graph was correct.
+
+    The lane now runs on the registry minus its node-id bindings, as a subflow
+    child does and as fancy-flow-php's ``ForEachExecutor`` always has.
+    """
+    schema = {
+        "version": 1,
+        "metadata": {"name": "lane"},
+        "graph": {
+            "nodes": [
+                {"id": "start", "kind": "manual_trigger"},
+                {"id": "each", "kind": "for_each", "config": {"source": "{{ in.rows }}"}},
+                {"id": "pick", "kind": "transform", "config": {"expression": "{{ in.n }}"}},
+                {"id": "after", "kind": "transform"},
+            ],
+            "edges": [
+                {"id": "e1", "source": "start", "target": "each"},
+                {"id": "e2", "source": "each", "sourceHandle": "item", "target": "pick"},
+                {"id": "e3", "source": "each", "sourceHandle": "done", "target": "after"},
+            ],
+        },
+    }
+    registry = _registry()
+    graph = import_workflow(schema, lenient=True, registry=registry).graph
+    initial = {"start": {"rows": [{"n": 1}, {"n": 2}]}}
+
+    single = FlowRunner(registry).run(
+        graph, builtin.executors(), options=RunOptions(initial_inputs=initial)
+    )
+    durable = Coordinator(
+        graph=graph,
+        executors=builtin.executors(),
+        kinds=registry,
+        run="lane",
+        initial_inputs=initial,
+    ).run_to_completion()
+
+    assert single.ok
+    assert durable.ok
+    # Stated outright, so an empty or fenced lane cannot pass by agreeing with
+    # an equally wrong single-process run.
+    assert single.outputs["each"]["value"]["results"] == [{"pick": 1}, {"pick": 2}]
+    assert _normalize(durable.outputs) == _normalize(single.outputs)

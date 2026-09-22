@@ -8,6 +8,29 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-09-22
+
+### Fixed
+
+- **A durable run of an item-wired `for_each` reported `ok` with every lane
+  result a fence marker.** 0.27.0's lane ran through `ctx.executors`, and under
+  the durable `Coordinator` that registry is the replay's fork -- every node
+  except the one being executed bound, by id, to a fence that succeeds with the
+  `fancy-flow:fenced` port. A lane node is a node of the same graph, so each one
+  matched its fence: `results` came back as
+  `[{"pick": {"__port": "fancy-flow:fenced", "value": null}}, ...]`, `failures`
+  was empty, and the run completed. The single-process run of the same graph
+  was correct, which is why nothing but a durable/single comparison could see
+  it.
+
+  The lane now runs on the registry minus its node-id bindings, as a `subflow`
+  child already did and as fancy-flow-php's `ForEachExecutor` always has. A
+  lane with no executor registry at all now aborts by name instead of failing
+  somewhere inside the runner.
+
+  **What you must do:** upgrade if you run `for_each` lanes durably. 0.27.0 was
+  live for under an hour. Single-process runs were never affected.
+
 ## [0.27.0] - 2026-09-22
 
 ### Added
