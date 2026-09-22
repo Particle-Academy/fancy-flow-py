@@ -8,6 +8,8 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-09-22
+
 ### Changed
 
 - **BREAKING:** Bare or unclosed routing strings in `branch.condition` and
