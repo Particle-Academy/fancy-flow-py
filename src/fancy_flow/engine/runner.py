@@ -376,6 +376,9 @@ class FlowRunner:
                 options.run,
                 executors,
                 terminal_access_for(node),
+                # Structural executors derive a nested lane from the graph they
+                # are in; ``for_each``'s ``item`` port needs it.
+                graph,
             )
             ok, payload = yield _Step(ctx, executor)
 

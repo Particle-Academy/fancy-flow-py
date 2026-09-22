@@ -8,6 +8,53 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-22
+
+### Added
+
+- **`for_each`'s `item` port now runs a lane once per item.** Wire `item` to a
+  node and the lane reachable from it -- stopping at anything reachable from
+  `done` -- executes once per resolved item, aggregating `{items, results,
+  failures, count}` on `done`. `results` is index-aligned with `items` (`None`
+  where an item's lane failed); `failures` holds `{index, item, error}` for each
+  one that did.
+
+  Until now this runtime accepted the edge and IGNORED it: every downstream node
+  ran ONCE against the whole collection, silently, with no error. fancy-labs'
+  `batch-scoring` reference graph produced five per-item scores on the PHP twin
+  and one aggregate here, and its assertion node failed with "the path names
+  nothing" because `results` was never produced. Against a local build of this
+  release that graph now runs identically on PHP and Python.
+
+  **This is not a new decision.** `fancy-conformance` 0.30.0 added `results` and
+  0.31.0 added `failures` to `flow/kind-declaration-surface`, both BREAKING, so
+  that a runtime which had not implemented iteration would fail instead of
+  reporting surface parity. This port was pinned to 0.29.0 and never saw them;
+  the pin moves to 0.31.0 here.
+
+  **What a consumer must DO: nothing, unless you wired `item`.** A `for_each`
+  with `item` unwired, or with `mode: "collect"`, publishes the list and its
+  size exactly as before -- one node, one claim, one checkpoint, which is still
+  the point for a 10,000-row fan-out. If you DID wire `item` and relied on
+  downstream nodes receiving the whole collection, they now receive one item at
+  a time; `mode: "collect"` restores the old behaviour explicitly.
+
+  A lane is capped at `maxItems` (default 1000, hard ceiling 10000); a list over
+  the cap FAILS the run rather than iterating past it or truncating silently. A
+  pause inside a lane aborts the run instead of being recorded as one item's
+  failure.
+
+### Changed
+
+- **`ExecutionContext.graph` is available to executors.** Optional and
+  additive (`None` by default). A structural executor cannot derive a nested
+  lane from `node` and `inputs` alone, which is why the `item` port had no
+  implementation. Hosts constructing a context by hand are unaffected.
+
+- **`for_each` declares `results` and `failures`.** Its `outputShape` and
+  description described the data-only half only, and 0.26.1 had tightened the
+  description to say "nothing runs per item" -- true then, and now not.
+
 ## [0.26.1] - 2026-09-16
 
 ### Fixed

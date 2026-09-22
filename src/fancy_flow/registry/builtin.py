@@ -639,16 +639,33 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "for_each",
-            # Read from logic.py:78.
+            # Read from logic.for_each. `results` and `failures` are the WIRED
+            # shape -- what a lane produces when `item` is connected. Declared
+            # unconditionally because a declaration describes the kind, not one
+            # graph's use of it, and because the shared table requires them:
+            # fancy-conformance 0.30.0 added `results` and 0.31.0 `failures`,
+            # both BREAKING, so a runtime that has not implemented iteration
+            # fails there rather than reporting surface parity it lacks.
             "outputShape": [
                 {"path": "items", "type": "array", "description": "The list that was iterated."},
+                {
+                    "path": "results",
+                    "type": "array",
+                    "description": "Each item's lane outputs, index-aligned; None where it failed.",
+                },
+                {
+                    "path": "failures",
+                    "type": "array",
+                    "description": "{index, item, error} for each item whose lane failed.",
+                },
                 {"path": "count", "type": "number", "description": "How many items it held."},
             ],
             "category": "logic",
             "label": "For Each",
             "description": (
-                "Publishes the resolved list and its size on BOTH `item` and `done`. "
-                "Fan-out as DATA, not as jobs -- nothing runs per item."
+                "Wire `item` to a lane and it runs once per item, aggregating `results` "
+                "and `failures` on `done`. Leave `item` unwired (or set `mode: collect`) "
+                "and it just publishes the list and its size -- one node, one checkpoint."
             ),
             "icon": "↻",
             "inputs": [{"id": "in"}],

@@ -385,3 +385,101 @@ def test_unregistering_only_removes_your_own_client() -> None:
 
     undo_first()
     assert capabilities.llm_client() is second
+
+
+# ---------------------------------------------------------------------------
+# `for_each`'s `item` port.
+#
+# Until this existed here, the schema accepted an `item` edge, the editor drew
+# it, and the engine ignored it: every downstream node ran ONCE against the
+# whole collection, silently, with no error. A reference graph scoring five
+# records produced five per-item scores on the PHP twin and one aggregate here,
+# and the assertion node downstream failed with "the path names nothing"
+# because ``results`` was never produced.
+#
+# The two data-only tests above are the other half of the contract and must keep
+# passing -- a `for_each` with no `item` edge starts no nested runs, which is
+# what makes a 10,000-row fan-out one node and one checkpoint.
+# ---------------------------------------------------------------------------
+
+
+def _lane_graph(config):
+    """A `for_each` whose `item` port feeds a body node, plus a `done` tail."""
+    from fancy_flow import FlowEdge, FlowGraph, FlowNode
+
+    return FlowGraph(
+        (
+            FlowNode("fe", "@particle-academy/for_each", config=config),
+            FlowNode("b"),
+            FlowNode("after"),
+        ),
+        (
+            FlowEdge("e2", "fe", "b", source_handle="item"),
+            FlowEdge("e3", "fe", "after", source_handle="done"),
+        ),
+    )
+
+
+def _run_lane(config, payload):
+    from fancy_flow import ExecutorRegistry, FlowRunner, RunOptions
+
+    executors = (
+        ExecutorRegistry()
+        .bind("@particle-academy/for_each", logic.for_each)
+        .bind("*", lambda ctx: ctx.input("in", ctx.inputs))
+    )
+    return FlowRunner().run(
+        _lane_graph(config),
+        executors,
+        None,
+        RunOptions(initial_inputs={"fe": {"in": payload}}),
+    )
+
+
+def test_an_item_edge_runs_the_lane_once_per_item_and_aggregates_on_done() -> None:
+    result = _run_lane({"source": "{{ in.rows }}"}, {"rows": ["a", "b", "c"]})
+
+    assert result.ok
+    assert result.outputs["fe"] == {
+        "__port": "done",
+        "value": {
+            "items": ["a", "b", "c"],
+            "results": [{"b": "a"}, {"b": "b"}, {"b": "c"}],
+            "failures": [],
+            "count": 3,
+        },
+    }
+
+
+def test_the_body_runs_per_item_not_once_on_the_collection() -> None:
+    """The specific defect: one run over the whole list looks like success."""
+    result = _run_lane({"source": "{{ in.rows }}"}, {"rows": [1, 2]})
+    value = result.outputs["fe"]["value"]
+
+    assert len(value["results"]) == 2
+    assert value["results"] != [{"b": [1, 2]}]
+
+
+def test_mode_collect_keeps_the_data_only_behaviour_even_with_an_item_edge() -> None:
+    """The documented escape hatch: one node, one claim, one checkpoint."""
+    result = _run_lane({"source": "{{ in.rows }}", "mode": "collect"}, {"rows": ["a", "b"]})
+
+    assert result.outputs["fe"] == {"items": ["a", "b"], "count": 2}
+
+
+def test_a_max_items_cap_fails_the_run_rather_than_iterating_past_it() -> None:
+    result = _run_lane({"source": "{{ in.rows }}", "maxItems": 2}, {"rows": [1, 2, 3]})
+
+    assert not result.ok
+    assert "exceeds its maxItems cap" in (result.error or "")
+
+
+def test_the_done_tail_receives_the_aggregate() -> None:
+    result = _run_lane({"source": "{{ in.rows }}"}, {"rows": ["a", "b"]})
+
+    assert result.outputs["after"] == {
+        "items": ["a", "b"],
+        "results": [{"b": "a"}, {"b": "b"}],
+        "failures": [],
+        "count": 2,
+    }

@@ -35,7 +35,7 @@ class ExecutionContext:
       node inside a terminal lane that never touches it spawns no process.
     """
 
-    __slots__ = ("_emit", "depth", "executors", "inputs", "node", "run", "terminal")
+    __slots__ = ("_emit", "depth", "executors", "graph", "inputs", "node", "run", "terminal")
 
     def __init__(
         self,
@@ -46,6 +46,7 @@ class ExecutionContext:
         run: RunIdentity | None = None,
         executors: Any = None,
         terminal: TerminalAccess | None = None,
+        graph: Any = None,
     ) -> None:
         self.node = node
         self.inputs = inputs
@@ -63,6 +64,21 @@ class ExecutionContext:
         # terminal lane. None is a REAL answer: a terminal node outside a lane
         # must say so rather than quietly opening a shell of its own.
         self.terminal = terminal
+        # The graph this node belongs to.
+        #
+        # A STRUCTURAL executor needs it: ``for_each``'s ``item`` port fans out
+        # over a lane derived from the graph -- the nodes reachable from
+        # ``item``, stopping at anything also reachable from ``done`` -- and
+        # that lane cannot be computed from ``node`` and ``inputs`` alone.
+        #
+        # Without it the ``item`` port was accepted by the schema, drawn by the
+        # editor, and silently ignored here: downstream nodes ran ONCE against
+        # the whole collection instead of once per item, with no error. The PHP
+        # twin has derived the same lane from ``$ctx->graph`` since 0.6.
+        #
+        # ``None`` when a host builds a context by hand, so an executor that
+        # needs it must degrade rather than raise.
+        self.graph = graph
 
     def abort(self, reason: str | None = None) -> NoReturn:
         """Stop the run. Raises :class:`RunAborted`; the runner records the reason."""

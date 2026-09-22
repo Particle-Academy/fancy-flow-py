@@ -26,7 +26,7 @@ def kind(name: str):
         ("llm_router", ["route", "reason", "input"]),
         ("notify", ["sent", "channel", "to", "message"]),
         ("webhook_out", ["sent", "status", "response"]),
-        ("for_each", ["items", "count"]),
+        ("for_each", ["items", "results", "failures", "count"]),
         ("wait", ["waited", "duration", "input"]),
         ("log", ["logged", "level"]),
     ],

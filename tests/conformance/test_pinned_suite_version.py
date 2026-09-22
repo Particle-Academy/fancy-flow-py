@@ -50,10 +50,20 @@ from fancy_conformance import version
 # flow/run-diagnostics 14 (and 14 through the durable Coordinator),
 # shared/flow-run-identity 25, flow/workflow-props 21 -- nothing failed.
 #
+# Moved 0.29.0 -> 0.31.0 on 2026-09-22, in the same change as the for_each
+# `item` lane. 0.30.0 added `results` and 0.31.0 `failures` to
+# flow/kind-declaration-surface row 0106, both BREAKING; the port before the
+# change failed that row. Every table was re-run against a v0.31.0 checkout:
+# flow/durable-dispatch 14, flow/entry-points 7, flow/executor-resolution 8 (+
+# the same six skips), shared/expr 26, flow/kind-declaration-surface 20,
+# flow/port-activation 12, shared/satisfies-range 17, flow/run-diagnostics 14
+# (and 14 through the durable Coordinator), shared/flow-run-identity 25,
+# flow/workflow-props 21 -- nothing failed.
+#
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together, and only after re-running the tables;
 # test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.29.0"
+PINNED_SUITE_VERSION = "0.31.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(

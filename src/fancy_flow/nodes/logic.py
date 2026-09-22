@@ -58,14 +58,92 @@ def switch_case(ctx: ExecutionContext) -> Any:
     return Port.only(port, ctx.input("in", ctx.inputs))
 
 
-def for_each(ctx: ExecutionContext) -> Any:
-    """``for_each`` -- fan-out as DATA, not as jobs.
+_FOR_EACH_DEFAULT_MAX_ITEMS = 1000
+_FOR_EACH_HARD_MAX_ITEMS = 10000
 
-    Publishes the resolved collection and its size. It does **not** spawn one
-    job per item, and that is deliberate: on a durable run a ``for_each`` over
-    10,000 rows is one node, one claim, one checkpoint -- not 10,000. Hosts
-    that want true per-item iteration override this executor.
+
+def _reachable(adjacency: dict[str, list[str]], starts: list[str]) -> set[str]:
+    """Every node id reachable from ``starts``, following edges forwards."""
+    seen: set[str] = set()
+    queue = list(starts)
+    cursor = 0
+    while cursor < len(queue):
+        node_id = queue[cursor]
+        cursor += 1
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        queue.extend(adjacency.get(node_id, ()))
+    return seen
+
+
+def _for_each_lane(graph: Any, node_id: str) -> tuple[Any, list[Any]] | None:
+    """The loop BODY: reachable from ``item``, stopping at anything ``done`` reaches.
+
+    Derived from the graph rather than declared, so a graph says what the body
+    is by being drawn -- there is no second list to keep in step with the edges.
+    The ``done`` subtraction is what lets a node sit after the loop and still be
+    reachable from inside it.
+
+    ``None`` means "no ``item`` edge", which is the data-only case, not an error.
     """
+    from ..schema.graph import FlowGraph
+
+    def handle(edge: Any) -> str:
+        return edge.source_handle or "out"
+
+    item_edges = [e for e in graph.edges if e.source == node_id and handle(e) == "item"]
+    if not item_edges:
+        return None
+
+    adjacency: dict[str, list[str]] = {}
+    for edge in graph.edges:
+        adjacency.setdefault(edge.source, []).append(edge.target)
+
+    done = _reachable(
+        adjacency,
+        [e.target for e in graph.edges if e.source == node_id and handle(e) == "done"],
+    )
+    body = {
+        nid
+        for nid in _reachable(adjacency, [e.target for e in item_edges])
+        if nid not in done and nid != node_id
+    }
+
+    lane = FlowGraph(
+        nodes=tuple(n for n in graph.nodes if n.id in body),
+        edges=tuple(e for e in graph.edges if e.source in body and e.target in body),
+        inputs=graph.inputs,
+    )
+    return lane, [e for e in item_edges if e.target in body]
+
+
+def for_each(ctx: ExecutionContext) -> Any:
+    """``for_each`` -- the collection as DATA, or the lane run once per item.
+
+    WITHOUT an ``item`` edge (or with ``mode: "collect"``) this publishes the
+    resolved collection and its size and stops. That half is deliberate rather
+    than unfinished: on a durable run a ``for_each`` over 10,000 rows is one
+    node, one claim, one checkpoint -- not 10,000.
+
+    WITH an ``item`` edge it runs the derived lane once per item and aggregates
+    on ``done``. That half was missing until the ``item`` port had an
+    implementation here at all: the schema accepted the edge, the editor drew
+    it, and the engine ignored it -- so every downstream node ran ONCE against
+    the whole collection, silently, with no error.
+
+    Measured rather than reasoned about: a reference graph scoring five records
+    produced five per-item scores on the PHP twin and one aggregate here, and
+    the assertion node downstream failed with "the path names nothing" because
+    ``results`` was never produced.
+
+    ``concurrency`` is still carried rather than acted on: items run in order,
+    and parity with the twin outranks throughput here.
+    """
+    from ..engine.runner import FlowRunner
+    from ..runtime.options import RunOptions
+    from ..runtime.pause import Pause
+
     source = expr.evaluate(ctx.option("source"), ctx.inputs)
     if isinstance(source, dict):
         items = list(source.values())
@@ -75,7 +153,74 @@ def for_each(ctx: ExecutionContext) -> Any:
         items = []
     else:
         items = [source]
-    return {"items": items, "count": len(items)}
+
+    lane = _for_each_lane(ctx.graph, ctx.node.id) if ctx.graph is not None else None
+    if lane is None or ctx.option("mode") == "collect":
+        return {"items": items, "count": len(items)}
+
+    lane_graph, entries = lane
+    if not lane_graph.nodes:
+        ctx.abort(f'for_each "{ctx.node.id}" has an item edge but its derived lane is empty')
+
+    max_items = ctx.option("maxItems", _FOR_EACH_DEFAULT_MAX_ITEMS)
+    try:
+        max_items = int(max_items)
+    except (TypeError, ValueError):
+        max_items = -1
+    if max_items < 1 or max_items > _FOR_EACH_HARD_MAX_ITEMS:
+        ctx.abort(
+            f'for_each "{ctx.node.id}" maxItems must be between 1 and {_FOR_EACH_HARD_MAX_ITEMS}'
+        )
+    if len(items) > max_items:
+        ctx.abort(
+            f'for_each "{ctx.node.id}" resolved {len(items)} items '
+            f"exceeds its maxItems cap of {max_items}"
+        )
+
+    results: list[Any] = []
+    failures: list[dict[str, Any]] = []
+
+    for index, item in enumerate(items):
+        initial_inputs: dict[str, dict[str, Any]] = {}
+        for edge in entries:
+            initial_inputs.setdefault(edge.target, {})[edge.target_handle or "in"] = item
+
+        nested = FlowRunner().run(
+            lane_graph,
+            ctx.executors,
+            None,
+            RunOptions(
+                initial_inputs=initial_inputs,
+                depth=ctx.depth + 1,
+                # The index rides on the identity, so a node in iteration 3
+                # cannot share an idempotency key with the same node in 4.
+                run=ctx.run.descend(ctx.node.id, index) if ctx.run else None,
+            ),
+        )
+
+        if not nested.ok:
+            reason = nested.error or "unknown error"
+
+            # A PAUSE IS NOT A FAILURE. It travels the error channel, and
+            # recording it as a failed item strands whoever the run waits on.
+            if Pause.decode(reason) is not None:
+                ctx.abort(reason)
+
+            results.append(None)
+            failures.append({"index": index, "item": item, "error": reason})
+            continue
+
+        results.append(nested.outputs)
+
+    return Port.only(
+        "done",
+        {
+            "items": items,
+            "results": results,
+            "failures": failures,
+            "count": len(items),
+        },
+    )
 
 
 def merge(ctx: ExecutionContext) -> Any:
