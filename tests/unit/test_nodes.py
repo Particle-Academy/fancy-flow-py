@@ -220,6 +220,46 @@ def test_truncation_raises_instead_of_decoding_to_nothing() -> None:
         structured.extract('Here are the results: [{"a": 1}, {"b":')
 
 
+def test_a_raw_newline_inside_a_string_value_is_repaired_and_read() -> None:
+    """fancy-flow-php#26, from a consumer's production run: a step asked for a
+    Markdown document inside one JSON string field and the model put a real
+    newline in it. The block is COMPLETE -- only the control character is
+    illegal -- so it is repaired and read rather than refused."""
+    nl = chr(10)
+    text = "```json" + nl + '{"doc":"# Title' + nl + 'Body","ok":true}' + nl + "```"
+
+    assert structured.extract(text) == {"doc": "# Title" + nl + "Body", "ok": True}
+
+
+def test_the_repair_cannot_rescue_a_truncated_block() -> None:
+    """The guard that makes the repair safe to have at all. Escaping control
+    characters cannot close an unterminated string or a missing bracket, so a
+    cut-off answer still fails rather than arriving as a short one."""
+    nl = chr(10)
+    with pytest.raises(FlowError):
+        structured.extract("```json" + nl + '[{"id":1},{"note":"a' + nl + 'b","ti')
+
+
+def test_the_failure_names_the_mechanism_and_never_prescribes_max_tokens() -> None:
+    """The message is fed back to a model in a corrective retry, so being wrong
+    about the mechanism instructs the retry to do the wrong thing. One consumer
+    was told to shorten a reply that was never too long."""
+    nl = chr(10)
+    with pytest.raises(FlowError) as caught:
+        structured.extract("```json" + nl + '{"doc":"a' + nl + 'b","broken":' + nl + "```")
+
+    assert "escaped as" in str(caught.value)
+    assert "max_tokens" not in str(caught.value)
+
+
+def test_a_newline_between_tokens_is_left_alone() -> None:
+    """Pretty-printed JSON is full of them and they are perfectly legal."""
+    nl = chr(10)
+    assert structured.extract("```json" + nl + "{" + nl + '  "a": 1' + nl + "}" + nl + "```") == {
+        "a": 1
+    }
+
+
 def test_an_empty_response_raises() -> None:
     with pytest.raises(FlowError):
         structured.extract("   ")

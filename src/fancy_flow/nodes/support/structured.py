@@ -69,10 +69,15 @@ def extract(text: str) -> Any:
         decoded = _try_json(inner)
         if decoded is not _MISS:
             return decoded
-        raise FlowError(
-            "The model returned a fenced block that is not valid JSON. This is usually "
-            "truncation - raise max_tokens, or narrow the schema so the answer fits."
-        )
+
+        error = _json_error(inner)
+        repaired = _repair_control_characters(inner)
+        if repaired is not None:
+            decoded = _try_json(repaired)
+            if decoded is not _MISS:
+                return decoded
+
+        raise FlowError(_decode_failure(error))
 
     sliced = _first_balanced_value(trimmed)
     if sliced is not None:
@@ -80,9 +85,102 @@ def extract(text: str) -> Any:
         if decoded is not _MISS:
             return decoded
 
+        repaired = _repair_control_characters(sliced)
+        if repaired is not None:
+            decoded = _try_json(repaired)
+            if decoded is not _MISS:
+                return decoded
+
     raise FlowError(
         "The model did not return JSON that could be parsed. First 200 characters: " + trimmed[:200]
     )
+
+
+def _json_error(text: str) -> json.JSONDecodeError | None:
+    """The decoder's own complaint, which ``_try_json`` swallows."""
+    try:
+        json.loads(text)
+    except json.JSONDecodeError as exc:
+        return exc
+    return None
+
+
+def _decode_failure(error: json.JSONDecodeError | None) -> str:
+    """Why the decode failed, in terms of the mechanism -- never a guess.
+
+    This message is not only read by people: a host may feed it back to the
+    model in a corrective retry (fancy-flow-php#26), so a wrong diagnosis does
+    not merely mislead, it INSTRUCTS the retry. One consumer was told to shorten
+    a reply that was never too long, missed again, and lost the run.
+
+    ``max_tokens`` is therefore never the headline remedy. A host whose model
+    settings come from an admin tier and are refused on a node -- as that
+    consumer's does -- is otherwise told to do the one thing it cannot.
+    """
+    detail = f": {error.msg}" if error is not None else ""
+    prefix = f"The model returned a fenced block that is not valid JSON{detail}. "
+
+    if error is not None and "control character" in error.msg.lower():
+        return prefix + (
+            "A raw control character appears inside a string value - usually a newline in a "
+            "field carrying Markdown or multi-line text, which JSON requires escaped as \\n. "
+            "Escaping them and re-reading was tried and still did not parse, so something else "
+            "is wrong with the block."
+        )
+
+    return prefix + (
+        "If it ends mid-value the answer was longer than the reply allowed: narrow the schema, "
+        "or split the long field into its own step, so it fits. If your host controls the model "
+        "output limit, raising it is the other remedy."
+    )
+
+
+_ESCAPES = {
+    chr(10): chr(92) + "n",
+    chr(13): chr(92) + "r",
+    chr(9): chr(92) + "t",
+    chr(12): chr(92) + "f",
+    chr(8): chr(92) + "b",
+}
+
+
+def _repair_control_characters(text: str) -> str | None:
+    """Escape raw control characters that sit INSIDE string literals.
+
+    ``None`` when there was nothing to repair, so a caller never re-parses for
+    no reason. The result is only ever ACCEPTED if it then parses, which is what
+    makes this safe: escaping a control character cannot close an unterminated
+    string or a missing bracket, so a truncated block still fails rather than
+    arriving as a short one.
+
+    Only inside strings. A newline BETWEEN tokens is legal JSON and pretty
+    printing is full of them; escaping those would corrupt a valid document.
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    changed = False
+
+    for char in text:
+        if escaped:
+            out.append(char)
+            escaped = False
+            continue
+        if char == "\\" and in_string:
+            out.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            out.append(char)
+            continue
+        if in_string and ord(char) < 0x20:
+            changed = True
+            out.append(_ESCAPES.get(char, chr(92) + f"u{ord(char):04x}"))
+            continue
+        out.append(char)
+
+    return "".join(out) if changed else None
 
 
 def validate(value: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
