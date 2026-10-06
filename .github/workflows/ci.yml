@@ -18,7 +18,7 @@ jobs:
     name: Python ${{ matrix.python }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -27,7 +27,7 @@ jobs:
       # abandoned dependency finds out now rather than at tag time.
       # The allowlist is FETCHED, never vendored: one source, no copies to drift.
       - name: Fetch the third-party allowlist
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Particle-Academy/.github
           path: .third-party-allowlist
@@ -56,7 +56,7 @@ jobs:
       # sibling ports sat red for weeks that way. A test fails if this ref and the
       # pin disagree.
       - name: Check out fancy-conformance
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Particle-Academy/fancy-conformance
           ref: v0.32.0
@@ -67,13 +67,13 @@ jobs:
       # test directory rather than in the conformance package, so the only
       # thing stopping our copy drifting is comparing the two here.
       - name: Check out fancy-flow-php
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Particle-Academy/fancy-flow-php
           path: .fancy-flow-php
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
