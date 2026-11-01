@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from ..registry.blank import trimmed_key
 from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
 from ..runtime.ports import Port
@@ -360,6 +361,10 @@ def _transform_rows(config: dict[str, Any]) -> list[tuple[str, Any]]:
     A row that is not an object, or whose ``key`` is not a non-blank string, is
     skipped. A later row with the same key overwrites the value but keeps the
     first position -- which is what a JavaScript object does, and a dict too.
+
+    "Blank" is :func:`~fancy_flow.registry.blank.trimmed_key`, the helper
+    ``validate_config`` judges a ``skipBlankRows`` row's text cells with -- so a
+    key the run skips is a key admission refuses whenever the row has a value.
     """
     rows = config.get("fields")
     if not isinstance(rows, list):
@@ -369,7 +374,7 @@ def _transform_rows(config: dict[str, Any]) -> list[tuple[str, Any]]:
         if not isinstance(row, dict):
             continue
         key = row.get("key")
-        trimmed = key.strip() if isinstance(key, str) else ""
+        trimmed = trimmed_key(key)
         if trimmed != "":
             out.append((trimmed, row.get("value")))
     return out

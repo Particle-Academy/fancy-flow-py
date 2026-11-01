@@ -8,6 +8,34 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-11-01
+
+### Fixed
+
+- **A whitespace-only key with a value was admitted and its value silently
+  dropped at run time; it is now refused like an empty key.** Reported by Maipa
+  against 0.30.0's twins: `transform` with `{"mode": "fields", "fields":
+  [{"key": "   ", "value": "Configured synthetic value"}]}` passed
+  `validate_config` with no issue, then ran as a passthrough, because the
+  validator compared the key with `""` while the executor strips it and skips a
+  blank one. Both now call ONE helper, `fancy_flow.registry.blank.trimmed_key`
+  (`str.strip()`: every character for which `str.isspace()` is true).
+  - a whitespace-only key WITH a value is refused with the empty-key message,
+    `Output fields item N: Key is required`;
+  - a whitespace-only key with a blank value is a skipped blank row, as the
+    editor's untouched default still is;
+  - a padded non-blank key is admitted and runs under the stripped key,
+    unchanged;
+  - the value is never stripped; expression mode and typed `{{ }}` values are
+    unchanged.
+
+  In a `skipBlankRows` repeater a `text` cell that strips to `""` is blank, for
+  skipping the row and for a `required` check. Only `transform` declares
+  `skipBlankRows`. Matches `@particle-academy/fancy-flow` 0.82.1.
+
+  **What a consumer must DO:** a config that relied on this was already losing
+  data, and it now errors at validation, so fix the key. Nothing else changes.
+
 ## [0.30.0] - 2026-11-01
 
 ### Added

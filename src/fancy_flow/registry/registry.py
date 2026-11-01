@@ -13,6 +13,7 @@ import copy
 from typing import Any
 
 from . import kind_id as kid
+from .blank import trimmed_key
 from .node_kind import ConfigField, NodeKind
 
 __all__ = [
@@ -181,8 +182,19 @@ def _validate_field(field: ConfigField, value: Any) -> str | None:
     return None
 
 
-def _is_blank(cell: Any) -> bool:
-    return cell is None or cell == ""
+def _is_blank(sub: ConfigField, cell: Any, strip_text: bool) -> bool:
+    """A repeater cell is blank when it is absent, ``None`` or ``""``.
+
+    In a ``skip_blank_rows`` repeater a ``text`` cell that strips to ``""`` is
+    blank too, judged by :func:`~fancy_flow.registry.blank.trimmed_key` -- the
+    executor's own helper -- because that is how ``transform`` reads its key.
+    Without it a whitespace-only key with a value was admitted and the run
+    dropped the value. Only text cells (the value is never stripped), and only
+    where the kind opted in. TypeScript's ``isBlankCell``.
+    """
+    if cell is None or cell == "":
+        return True
+    return strip_text and sub.type == "text" and isinstance(cell, str) and trimmed_key(cell) == ""
 
 
 def _validate_repeater(field: ConfigField, value: Any) -> str | None:
@@ -199,11 +211,13 @@ def _validate_repeater(field: ConfigField, value: Any) -> str | None:
     for index, row in enumerate(value, start=1):
         if not isinstance(row, dict):
             return f"{field.label} item {index} must be an object"
-        if field.skip_blank_rows and all(_is_blank(row.get(sub.key)) for sub in field.fields):
+        if field.skip_blank_rows and all(
+            _is_blank(sub, row.get(sub.key), True) for sub in field.fields
+        ):
             continue
         for sub in field.fields:
             cell = row.get(sub.key)
-            if sub.required and _is_blank(cell):
+            if sub.required and _is_blank(sub, cell, field.skip_blank_rows):
                 return f"{field.label} item {index}: {sub.label} is required"
             if cell is None:
                 continue

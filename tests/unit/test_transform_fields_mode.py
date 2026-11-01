@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from fancy_flow import FlowRunner, NodeKindRegistry, RunOptions, builtin, import_workflow
+from fancy_flow.registry.node_kind import NodeKind
 
 EDITOR_DEFAULTS = {"mode": "fields", "fields": [{"key": "", "value": ""}]}
 
@@ -144,6 +145,77 @@ def test_invalid_configs_are_still_refused(
     registry: NodeKindRegistry, config: dict[str, Any], issues: list[dict[str, str]]
 ) -> None:
     assert registry.validate_config(kind(registry), config) == issues
+
+
+# -- a whitespace-only key is blank, in admission as in the executor -----------
+#
+# ``{"key": "   ", "value": "Configured synthetic value"}`` validated with no
+# issue (the check compared with ""), then ran as a passthrough: the executor
+# strips the key, finds it blank and skips the row, so the value vanished.
+# Reported by Maipa against the published 0.30.0. Messages read off
+# ``@particle-academy/fancy-flow`` 0.82.1.
+
+KEY_REQUIRED = [{"key": "fields", "message": "Output fields item 1: Key is required"}]
+
+
+def test_a_whitespace_only_key_with_a_value_is_refused(registry: NodeKindRegistry) -> None:
+    config = {"mode": "fields", "fields": [{"key": "   ", "value": "Configured synthetic value"}]}
+    assert registry.validate_config(kind(registry), config) == KEY_REQUIRED
+
+
+@pytest.mark.parametrize("key", ["\t", "\n", " \r\n ", chr(0x00A0), chr(0x2003), chr(0x3000)])
+def test_every_whitespace_the_executor_strips_is_refused(
+    registry: NodeKindRegistry, key: str
+) -> None:
+    config = {"mode": "fields", "fields": [{"key": key, "value": "x"}]}
+    assert registry.validate_config(kind(registry), config) == KEY_REQUIRED
+    # ...and the executor really does drop that row: same helper, same verdict.
+    assert run(config, {"a": 1}) == {"a": 1}
+
+
+def test_a_whitespace_only_key_with_an_empty_value_is_a_blank_row(
+    registry: NodeKindRegistry,
+) -> None:
+    fields_mode = {"mode": "fields", "fields": [{"key": "   ", "value": ""}]}
+    assert registry.validate_config(kind(registry), fields_mode) == []
+    assert (
+        registry.validate_config(kind(registry), {"mode": "fields", "fields": [{"key": "\t"}]})
+        == []
+    )
+
+
+def test_a_padded_key_is_admitted_and_runs_under_the_trimmed_key(
+    registry: NodeKindRegistry,
+) -> None:
+    config = {"mode": "fields", "fields": [{"key": "  name ", "value": "{{ $json.first }}"}]}
+    assert registry.validate_config(kind(registry), config) == []
+    assert run(config, {"first": "Ada"}) == {"name": "Ada"}
+
+
+def test_the_value_is_judged_unstripped(registry: NodeKindRegistry) -> None:
+    padded = {"mode": "fields", "fields": [{"key": "pad", "value": "  "}]}
+    assert registry.validate_config(kind(registry), padded) == []
+    no_key = {"mode": "fields", "fields": [{"key": "", "value": "  "}]}
+    assert registry.validate_config(kind(registry), no_key) == KEY_REQUIRED
+
+
+def test_a_repeater_that_did_not_opt_in_does_not_strip(registry: NodeKindRegistry) -> None:
+    other = NodeKind.from_dict(
+        {
+            "name": "acme/rows",
+            "category": "logic",
+            "label": "Rows",
+            "configSchema": [
+                {
+                    "type": "repeater",
+                    "key": "rows",
+                    "label": "Rows",
+                    "fields": [{"type": "text", "key": "key", "label": "Key", "required": True}],
+                }
+            ],
+        }
+    )
+    assert registry.validate_config(other, {"rows": [{"key": "  "}]}) == []
 
 
 # -- execution ---------------------------------------------------------------
