@@ -9,6 +9,7 @@ catalogue -- can keep their own.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from . import kind_id as kid
@@ -130,7 +131,10 @@ class NodeKindRegistry:
             if field.key in config:
                 continue
             if field.has_default:
-                config[field.key] = field.default
+                # A copy: a repeater's default rows are a list of dicts, and
+                # handing out the declaration's own list would let one node's
+                # edit change every node created after it.
+                config[field.key] = copy.deepcopy(field.default)
         return config
 
     def validate_config(self, kind: NodeKind, config: dict[str, Any]) -> list[dict[str, str]]:
@@ -171,7 +175,41 @@ def _validate_field(field: ConfigField, value: Any) -> str | None:
         return (
             None if str(value) in allowed else f"{field.label} must be one of " + ", ".join(allowed)
         )
+    if field.type == "repeater":
+        return _validate_repeater(field, value)
     # json is permissive -- any JSON-shaped value passes.
+    return None
+
+
+def _is_blank(cell: Any) -> bool:
+    return cell is None or cell == ""
+
+
+def _validate_repeater(field: ConfigField, value: Any) -> str | None:
+    """Faithful to the ``repeater`` case of TypeScript's ``validateField``.
+
+    Reports the FIRST offending row, so the author knows which one.
+    """
+    if not isinstance(value, list):
+        return f"{field.label} must be a list"
+    if field.min_items is not None and len(value) < field.min_items:
+        return f"{field.label} needs at least {field.min_items}"
+    if field.max_items is not None and len(value) > field.max_items:
+        return f"{field.label} allows at most {field.max_items}"
+    for index, row in enumerate(value, start=1):
+        if not isinstance(row, dict):
+            return f"{field.label} item {index} must be an object"
+        if field.skip_blank_rows and all(_is_blank(row.get(sub.key)) for sub in field.fields):
+            continue
+        for sub in field.fields:
+            cell = row.get(sub.key)
+            if sub.required and _is_blank(cell):
+                return f"{field.label} item {index}: {sub.label} is required"
+            if cell is None:
+                continue
+            message = _validate_field(sub, cell)
+            if message is not None:
+                return f"{field.label} item {index}: {message}"
     return None
 
 

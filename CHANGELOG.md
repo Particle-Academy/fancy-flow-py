@@ -8,6 +8,54 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-01
+
+### Added
+
+- **`transform` fields mode** -- the editor's DEFAULT authoring path, which did
+  not exist here. `transform` now declares the same three keys, defaults and
+  types as `@particle-academy/fancy-flow`: `mode` (`fields` | `expression`,
+  default `fields`), `fields` (rows of `{key, value}`, default one blank row)
+  and an optional `expression`. In fields mode each row with a non-blank `key`
+  becomes a key on the output (trimmed), its `value` resolved through `{{ }}`:
+  a whole expression keeps its type, mixed text interpolates, a non-string is
+  already a value, and a repeated key keeps the later value. A blank row is
+  skipped, and a node with no row to write passes its input through. Expression
+  mode ignores `fields`, fields mode ignores `expression`, an absent `mode`
+  takes the expression when one is configured, and an unknown `mode` takes the
+  fields path -- all as the reference does (`logic.transform_path`).
+- **`repeater` config fields.** `ConfigField` carries `fields` (the row schema),
+  `title_key`, `add_label`, `min_items`, `max_items` and `skip_blank_rows`, reads
+  and writes them under the TypeScript names, and `validate_config` checks a
+  repeater as TypeScript does: a list, each row an object, each row field
+  required/typed, the first offending row reported.
+
+### Fixed
+
+- **The editor's defaults for a `transform` node are now admitted** (reported by
+  Maipa against 0.29.0). `validate_config` refused
+  `{"mode": "fields", "fields": [{"key": "", "value": ""}]}` with `Expression
+  is required`, because this port declared ONLY a required `expression`. Invalid
+  configs are still refused the way the reference refuses them: an unknown
+  `mode`, `fields` that is not a list, a non-object row, a row with a value and
+  no key (the executor would drop it), a non-string `expression`.
+- **`transform`'s `emits` follows the path the executor takes**: `input` only
+  when the input passes through, `expression:expression` only when the
+  expression runs, and `None` for a built object.
+- **A cyclic graph's error is now `Cycle detected in flow graph — aborting.`
+  with an EM DASH**, as TypeScript, PHP and Rust write it and as
+  fancy-conformance `flow/graph-runs` 0021 asserts. This port wrote an ASCII
+  hyphen, which a substring check passed for every release.
+- `default_config_for` hands out a COPY of a declared default, so editing one
+  new node's `fields` rows can no longer change the default for the next.
+
+**What a consumer must DO.** A graph built in the editor in fields mode now
+produces the object it was built to produce here, where it used to pass its
+input through unchanged; that is the fix, but if a host had come to rely on the
+passthrough, set `mode: "expression"` with no expression to keep it. A host
+that matched the cycle error by exact string must expect the em dash; a
+substring match on `Cycle detected` is unaffected. Otherwise nothing.
+
 ## [0.29.0] - 2026-09-28
 
 ### Fixed

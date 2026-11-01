@@ -313,12 +313,63 @@ def wait(ctx: ExecutionContext) -> Any:
 
 
 def transform(ctx: ExecutionContext) -> Any:
-    """``transform`` -- reshape in place.
+    """``transform`` -- reshape in place. One ``out`` port, always active.
 
-    With no expression the input passes through untouched. One ``out`` port,
-    always active.
+    A port of ``transformExecutor`` in ``@particle-academy/fancy-flow``, the
+    reference for this kind. Which output it produces is :func:`transform_path`.
+    Until 0.30.0 this read ``expression`` alone, so fields mode -- the editor's
+    DEFAULT -- did not exist here and a graph built field by field passed its
+    input straight through.
     """
-    expression = ctx.option("expression")
-    if expression is None or expression == "":
-        return ctx.input("in", ctx.inputs)
-    return expr.evaluate(expression, ctx.inputs)
+    config = ctx.node.config or {}
+    path = transform_path(config)
+    if path == "expression":
+        return expr.evaluate(config["expression"], ctx.inputs)
+    if path == "fields":
+        return {key: expr.evaluate(value, ctx.inputs) for key, value in _transform_rows(config)}
+    return ctx.input("in", ctx.inputs)
+
+
+def transform_path(config: dict[str, Any]) -> str:
+    """Which of its three outputs a ``transform`` config produces.
+
+    The executor AND the kind's ``emits`` read this, as in the reference.
+
+    - ``expression`` -- ``mode`` is ``expression`` or unset, and ``expression``
+      is a non-blank string.
+    - ``fields`` -- otherwise, when at least one row has a non-blank ``key``.
+    - ``input`` -- the input, untouched: an explicit ``mode: "expression"`` with
+      no expression, or no row with a key (the editor's untouched default).
+
+    Any other ``mode`` value, including one the schema does not list, takes the
+    fields path, as TypeScript's does; the validator is what reports it.
+    """
+    mode = config.get("mode")
+    if mode is None or mode == "expression":
+        expression = config.get("expression")
+        if isinstance(expression, str) and expression.strip() != "":
+            return "expression"
+        if mode == "expression":
+            return "input"
+    return "fields" if _transform_rows(config) else "input"
+
+
+def _transform_rows(config: dict[str, Any]) -> list[tuple[str, Any]]:
+    """The rows fields mode writes, in order, with each key trimmed.
+
+    A row that is not an object, or whose ``key`` is not a non-blank string, is
+    skipped. A later row with the same key overwrites the value but keeps the
+    first position -- which is what a JavaScript object does, and a dict too.
+    """
+    rows = config.get("fields")
+    if not isinstance(rows, list):
+        return []
+    out: list[tuple[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = row.get("key")
+        trimmed = key.strip() if isinstance(key, str) else ""
+        if trimmed != "":
+            out.append((trimmed, row.get("value")))
+    return out

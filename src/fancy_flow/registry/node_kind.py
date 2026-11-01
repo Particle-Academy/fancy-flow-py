@@ -19,7 +19,13 @@ class ConfigField:
     """One field in a kind's config schema -- the form spec shared with the editor.
 
     ``type`` is one of: text, textarea, number, select, switch, json,
-    expression, credential. Attributes irrelevant to a given type stay ``None``.
+    expression, credential, repeater. Attributes irrelevant to a given type stay
+    ``None``.
+
+    A ``repeater`` is a list of rows, each validated against ``fields`` -- the
+    TypeScript ``RepeaterConfigField``. ``skip_blank_rows`` says a row whose
+    every field is blank is an unfilled placeholder: validation skips it. Set it
+    only where the kind's executor ignores such a row too.
     """
 
     type: str
@@ -37,6 +43,12 @@ class ConfigField:
     credential_type: str | None = None
     rows: int | None = None
     language: str | None = None
+    fields: tuple[ConfigField, ...] = ()
+    title_key: str | None = None
+    add_label: str | None = None
+    min_items: int | None = None
+    max_items: int | None = None
+    skip_blank_rows: bool = False
 
     @property
     def has_default(self) -> bool:
@@ -60,6 +72,12 @@ class ConfigField:
             credential_type=_opt_str(raw.get("credentialType")),
             rows=int(raw["rows"]) if raw.get("rows") is not None else None,
             language=_opt_str(raw.get("language")),
+            fields=tuple(ConfigField.from_dict(sub) for sub in raw.get("fields") or ()),
+            title_key=_opt_str(raw.get("titleKey")),
+            add_label=_opt_str(raw.get("addLabel")),
+            min_items=int(raw["minItems"]) if raw.get("minItems") is not None else None,
+            max_items=int(raw["maxItems"]) if raw.get("maxItems") is not None else None,
+            skip_blank_rows=bool(raw.get("skipBlankRows", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -78,12 +96,20 @@ class ConfigField:
             "credentialType": self.credential_type,
             "rows": self.rows,
             "language": self.language,
+            "titleKey": self.title_key,
+            "addLabel": self.add_label,
+            "minItems": self.min_items,
+            "maxItems": self.max_items,
         }
         for key, value in extras.items():
             if value is not None:
                 out[key] = value
         if self.options:
             out["options"] = [dict(o) for o in self.options]
+        if self.skip_blank_rows:
+            out["skipBlankRows"] = True
+        if self.fields:
+            out["fields"] = [sub.to_dict() for sub in self.fields]
         return out
 
 

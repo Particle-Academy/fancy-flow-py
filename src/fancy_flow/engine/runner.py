@@ -230,7 +230,8 @@ class FlowRunner:
         # Deterministic topological order; also the cycle check.
         order = _topo_sort(graph)
         if order is None:
-            msg = "Cycle detected in flow graph - aborting."
+            # EM DASH, as TypeScript, PHP and Rust write it (graph-runs 0021).
+            msg = "Cycle detected in flow graph — aborting."
             emit(RunEvent.run_error(msg))
             return RunResult(False, outputs, msg, tuple(events))
 

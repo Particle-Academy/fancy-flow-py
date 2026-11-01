@@ -30,6 +30,13 @@ from .registry import NodeKindRegistry, default_registry
 
 __all__ = ["agent_kind", "executors", "kind_id_index", "kinds", "register", "structural_kinds"]
 
+#: ``transform``'s relation for each path ``logic.transform_path`` can choose.
+_TRANSFORM_EMITS: dict[str, str | None] = {
+    "expression": "expression:expression",
+    "fields": None,
+    "input": "input",
+}
+
 
 def register(
     registry: NodeKindRegistry | None = None, with_structural: bool = False
@@ -832,24 +839,64 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
         },
         {
             "name": "transform",
-            # logic.py:144-145 has TWO returns: the input unchanged when no
-            # expression is configured, else the expression's shape. So the
-            # RELATION itself depends on config.
-            "emits": lambda config: (
-                "input" if not (config.get("expression") or "") else "expression:expression"
-            ),
+            # logic.transform has THREE outputs, chosen by logic.transform_path:
+            # the expression's shape, a freshly built object (no relation --
+            # under-claiming is free), or the input untouched. So the RELATION
+            # itself depends on config, and reads the same function the
+            # executor does so the two cannot disagree.
+            "emits": lambda config: _TRANSFORM_EMITS[logic.transform_path(config or {})],
             "category": "logic",
             "label": "Transform",
             "description": "Reshape data with an expression.",
             "icon": "ƒ",
+            # The same three keys, defaults and types as the TypeScript kind,
+            # because the TypeScript editor writes the config this validates.
             "configSchema": [
+                {
+                    "type": "select",
+                    "key": "mode",
+                    "label": "Build the output",
+                    "default": "fields",
+                    "options": [
+                        {"value": "fields", "label": "Field by field"},
+                        {"value": "expression", "label": "One expression"},
+                    ],
+                },
+                {
+                    "type": "repeater",
+                    "key": "fields",
+                    "label": "Output fields",
+                    "description": "Each row becomes a key on the result.",
+                    "titleKey": "key",
+                    "addLabel": "Add field",
+                    # The default row is blank and the executor skips a row
+                    # with no key, so an untouched row is a placeholder.
+                    "skipBlankRows": True,
+                    "fields": [
+                        {
+                            "type": "text",
+                            "key": "key",
+                            "label": "Key",
+                            "required": True,
+                            "placeholder": "name",
+                        },
+                        {
+                            "type": "expression",
+                            "key": "value",
+                            "label": "Value",
+                            "example": "{{ $json.first }}",
+                            "required": True,
+                        },
+                    ],
+                    "default": [{"key": "", "value": ""}],
+                },
                 {
                     "type": "expression",
                     "key": "expression",
-                    "label": "Expression",
+                    "label": "Expression (advanced)",
                     "example": "{{ { id: $json.id, name: $json.first + ' ' + $json.last } }}",
-                    "required": True,
-                }
+                    "description": "Used when the mode above is set to one expression.",
+                },
             ],
         },
         # ---------------- Data ----------------

@@ -57,7 +57,10 @@ def test_a_cycle_aborts_before_anything_runs() -> None:
     )
 
     assert result.ok is False
-    assert "Cycle detected" in (result.error or "")
+    # The exact message, EM DASH included: fancy-conformance flow/graph-runs 0021
+    # asserts it verbatim, and an ASCII hyphen here passed a substring check for
+    # every release up to 0.29.0 while TypeScript, PHP and Rust agreed.
+    assert result.error == "Cycle detected in flow graph — aborting."
     assert ran == [], "a cycle must be caught up front, not discovered mid-run"
 
 
