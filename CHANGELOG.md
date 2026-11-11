@@ -8,6 +8,13 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+### Changed
+
+- **Releases need a lab-run certificate.** `publish.yml` gains a read-only
+  `lab-certificate` job that every publishing job needs: a tag is published only
+  when the fancy-labs lab has certified that exact version and commit. Consumers
+  do nothing; this changes how releases are cut, not what the package does.
+
 ## [0.30.1] - 2026-11-01
 
 ### Fixed
@@ -115,7 +122,6 @@ substring match on `Cycle detected` is unaffected. Otherwise nothing.
   field into its own step, is advice every host can act on.
 
   **What you must DO: nothing.** A case that used to throw now parses.
-
 
 ## [0.28.0] - 2026-09-22
 
@@ -1439,7 +1445,6 @@ exactly; these are the edges that differ.
 
   **`stopping_msg` fires only when the node SUCCEEDS.** A completion message
   after a raise tells a human the opposite of what happened.
-
 
 ### Added
 
