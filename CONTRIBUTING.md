@@ -1,0 +1,280 @@
+# Contributing to fancy-flow (Python)
+
+Notes for anyone, human or agent, working ON this package's code. How to USE the
+package is in [AGENTS.md](./AGENTS.md); what it is, is in [README.md](./README.md).
+`CLAUDE.md` is a symlink to this file, so Claude Code reads these notes when it
+works in this repo.
+
+Python runtime for `fancy-flow` workflow graphs. The framework-free twin of
+`@particle-academy/fancy-flow`'s TypeScript engine and of
+`particle-academy/fancy-flow-php`.
+
+This file describes **this package's code**. Process rules — publishing, kit
+versioning, backports, the issue protocol — live in the envelope's `RULES.md`
+and are deliberately not repeated.
+
+## What this package is
+
+A faithful **port**, not a redesign. Behaviour questions are settled against the
+peers, in this order: `@particle-academy/fancy-flow`'s `src/runtime/run-flow.ts`
+and `src/registry/*` for the contract, `particle-academy/fancy-flow-php` for how
+a *server* twin realises it.
+
+The guarantee: **same `WorkflowSchema` JSON in, same `RunResult.outputs` out**
+on Node, PHP and Python. Don't break it.
+
+Where this port deliberately differs from a peer, the difference is in a
+docstring at the point of divergence and in the envelope plan. There are three
+as of 0.1.0, and all three are listed under "Deliberate divergences" below.
+
+## Architecture
+
+Pure core, `src/` layout, **zero runtime dependencies**.
+
+- `workflow.py` — import / export / validate WorkflowSchema v1. **`lenient`
+  softens vocabulary (an unknown kind), never the schema version:** a document
+  that is not `version: 1` after migration is refused in every mode with an
+  empty graph, as the TS and PHP importers refuse it. `True` is not a version
+  even though `True == 1`, and `1.0` is, because JavaScript cannot tell it from
+  `1`. Anything that imports in order to RUN checks `ImportResult.refused`
+  (the `subgraph` executor raises `UnreadableWorkflow`), not `ok`: a graph that
+  was read but carries a connectivity error has always run.
+- `engine/runner.py` — `FlowRunner`, the `runFlow` port. Kahn topo, ports,
+  branching, cycles, timeout, resume. **A node runs when ≥1 incoming edge is
+  active** (merge-after-decision, `#1`) and `_collect_inputs` reads only active
+  edges. Don't regress either.
+- `registry/` — `NodeKindRegistry`, `NodeKind`, `ConfigField`, `kind_id`, and
+  `builtin` (the 29 authorable kinds, plus structural `note` and `subgraph`,
+  and a default executor for each one that executes).
+  **`registry.never_executes()` is the ONE definition of what the engine walks
+  past** — `layout` and `annotation` by category, plus `note` / `lane` /
+  `terminal_lane` by id so it still holds against an empty registry. The
+  runner, `may_float` and the every-kind-has-an-executor test all read it;
+  any two of them disagreeing would produce either an unrunnable node or a
+  spurious missing-executor failure, and both look like something else.
+- `executors.py` — `ExecutorRegistry`; resolves node id → kind → `*`.
+- `runtime/` — `RunEvent`, `RunOptions`, `RunResult`, `ExecutionContext`,
+  `Port`, `Pause`, `AbortSignal`, `RunIdentity`.
+  **`RunIdentity` is what a WRITING node keys an idempotent call on.**
+  `ctx.run.step_key(ctx.node.id)` is the same on every retry of one step and
+  different for every other execution of the same node — which is why `attempt`
+  is carried on it and is NOT part of the key. `(run, node)` alone is
+  insufficient: a node runs once per subflow invocation and once per loop
+  iteration, so the key composes the invocation `path` and an optional
+  `occurrence`. `is_replay_safe()` says whether a retry is still inside the
+  provider's dedup window; past it the caller must REFUSE, because resending the
+  key and minting a fresh one both write twice. Pinned by
+  `shared/flow-run-identity`; the other two runtimes implement the same table.
+- `nodes/` — the default executors by domain, plus `nodes/support/` (injectable
+  client protocols, offline fakes, the `{{ }}` resolver, structured output).
+- `capabilities/` — the HOST seam: `LlmClient` (`choose_route`, used by
+  `llm_router`), `WorkflowResolver` (used by `subflow`), and `TerminalHost`
+  (used by terminal lanes). The core spawns no PTY for the same reason it
+  imports no model SDK.
+- `durable/` — resumable runs with **no queue library**: the claim contract, the
+  frontier, per-node replay, retry policy, human gates, and the coordinator.
+- `security/policy.py` — `GraphPolicy`, for a graph that arrived over the wire.
+- `marketplace/manifest.py` — node-manifest validation and `satisfies_range`.
+
+### The engine is one walk, driven two ways
+
+TypeScript executors may be `async`; PHP's are synchronous. Python has both, and
+writing the loop twice would put two copies of the routing rules in the file
+that exists to have exactly one.
+
+So `FlowRunner._walk` is a **generator**: it yields a node to execute and is sent
+the outcome back. `run()` drives it synchronously; `arun()` drives the same
+generator while awaiting awaitable results. Add behaviour to `_walk`, never to a
+driver.
+
+`run()` refuses an awaitable rather than storing it. A coroutine object sitting
+in `outputs[node]` looks like success and reaches every downstream node as a
+value nothing can read.
+
+### The durable layer, and why it is not Temporal
+
+Durability is **checkpoint-per-node, keyed by node id**, in the host's own
+store — the same shape as `fancy-flow-php`'s `node_outputs`.
+
+Event-sourced replay (Temporal, Restate) exists to police *arbitrary user code*
+for non-determinism, and charges a sandbox, history-size limits and permanent
+versioning for it. An interpreter over a declarative JSON graph is deterministic
+by construction, so none of that is bought. Worse, checkpoint identity in those
+systems is positional (DBOS keys on a call ordinal); ours is the node id, which
+is what lets a graph be edited while a run is parked on an approval.
+
+Three rules hold the per-node driver together, and each exists because the
+alternative fails silently:
+
+1. **The engine is not reimplemented.** `durable/replay.py` executes a node by
+   replaying the graph *through* `FlowRunner` with completed nodes fed back as
+   `resume_outputs` and every other node fenced off with `bind_node`. Inputs,
+   branching and skips are therefore the engine's, not a driver's copy.
+2. **Activated ports come from the engine's own `node-output` events**, stored on
+   the claim row. `Frontier` reads them; it must never compute them. A second
+   copy of `_activated_ports` would agree for a year and then disagree on one
+   branch.
+3. **The claim is a unique constraint, not a check.** A lost race is a NO-OP.
+   `NodeClaimStore.claim()` must be atomic, and must let an owner re-enter its
+   OWN claim — that is what lets a retry resume instead of deadlocking against
+   the row it wrote itself, and it is also what makes the retry's idempotency
+   key identical to the first attempt's, since both read the same row.
+4. **`NodeState.first_attempt_at` is the retry clock and must never move.** It
+   is stamped on the first claim only. A store that refreshed it per attempt
+   would report a retry 25 hours late as seconds old, and a connector would
+   reuse a key the provider forgot yesterday.
+
+A failed node whose attempts are not exhausted is left **CLAIMED**, never
+recorded FAILED: a FAILED node settles, and settling one mid-retry skips
+everything downstream while the run reports a tidy finish. `NodeOutcome.retryable`
+is how a queue adapter learns to re-dispatch — with the SAME owner token.
+
+`Coordinator.run_to_completion()` drives both operations in-process. It is a real
+durable runner over a persistent store, not a stand-in for one.
+
+**Dispatch is serial by default** (`durable/dispatch.py`, fancy-flow-php#17).
+`Coordinator.max_concurrent` caps how many of one run's nodes are HELD at once,
+and `advance()` returns `select_dispatch(frontier.ready, state, max_concurrent)`:
+`1` (the default) is one node at a time in declaration order, `0`
+(`UNLIMITED_CONCURRENCY`) is the whole ready frontier. Two rules in it fail
+silently when broken:
+
+- **Held is CLAIMED + PAUSED** (`NodeRunStatus.HELD`). A pause does not park the
+  run on this coordinator, so a gate that freed its slot would let a queue
+  adapter hand out its siblings while the person is still deciding. Resuming a
+  gate -- `release()` then `advance()`, or re-entering the paused claim with its
+  own owner token -- frees the slot; both paths are tested.
+- **The budget counts work already held, never one call's batch.** Two settles
+  on a real queue each call `advance()`; a per-batch cap lets each hand out its
+  own quota.
+
+Pinned by `flow/durable-dispatch`, whose simulation calls the same
+`Frontier.compute` and `select_dispatch`.
+
+### Kind ids
+
+Canonical ids are `@particle-academy/<name>`; old spellings live on as aliases.
+**Anything keyed by kind name must key on EVERY id a kind answers to** —
+registry lookups, executor bindings, retry overrides and `GraphPolicy` all do.
+Getting this wrong once cost a human gate: a durable override bound under the
+bare name only never matched a node saved as `@particle-academy/user_input`, so
+the run went straight past the person it was meant to stop for, and nothing
+errored.
+
+## Terminal lanes
+
+A `terminal_lane` owns one terminal for a whole run; `terminal_run` /
+`terminal_send` / `terminal_await` go inside it. **They are async, so they only
+work through `arun()`.**
+
+Three properties, all about WHEN, and each fails silently:
+
+1. **One terminal per lane.** Two shells look like one that forgot a `cd`.
+2. **Opened at the first node that uses it**, not at run start.
+3. **Closed when the run ends, including when it FAILS.** A leaked PTY looks
+   like nothing at all until the machine is full of them.
+
+`runtime/terminal.py` holds the matching, and every line of it is there for a
+hazard that is intermittent in production and invisible in a tidy test: chunks
+are arbitrary (match an accumulated buffer, never a chunk); escapes straddle
+chunks (hold back an incomplete trailing sequence rather than stripping it into
+the text); output arrives before anyone is listening (attach the transcript
+when the SESSION opens). A match is consumed so a loop cannot read one old line
+forever.
+
+**One exit watcher per session, shared by every wait, and a wait never cancels
+it.** A wait that cancelled it on the way out would disarm exit-detection for
+every wait after it — so a dead shell would be named correctly by the first
+node and reported as a timeout by every one after, which is worse than never
+naming it because the first report teaches you to trust the second.
+
+`fancy-flow-php` is excluded by design: it needs desktop execution.
+
+## Deliberate divergences
+
+Three, all tested and all recorded in `.ai/plans/fancy-flow-py.md`:
+
+1. **`GraphPolicy.untrusted()` fails closed.** The PHP twin returns a policy
+   whose allowlist is *absent*, and an absent allowlist permits every kind — so
+   a caller who forgets `allowKinds()` gets size caps and byte hygiene from a
+   method named `untrusted`. Here the allowlist starts empty. No correctly
+   configured policy changes verdict.
+2. **No LLM auto-detection.** PHP probes for Prism / laravel-ai with
+   `class_exists()`, which is free. The Python equivalent is importing a
+   candidate to find out whether it is there: side effects, start-up cost, and a
+   provider the author never named. A missing client aborts with
+   `llm_unavailable_message()` instead.
+3. **`{{ x.length }}` on a list is `None`.** JavaScript resolves it because
+   arrays carry a `length` property; PHP does not, and neither does this. The
+   shared table has no row for it — promoting one is in the plan.
+
+## Parity is a test result, not a claim
+
+- `tests/conformance/` runs nine tables from `particle-academy/fancy-conformance`:
+  `shared/expr`, `shared/satisfies-range`, `shared/flow-run-identity`,
+  `flow/durable-dispatch`, `flow/entry-points`, `flow/executor-resolution`,
+  `flow/kind-declaration-surface`, `flow/run-diagnostics` and
+  `flow/workflow-props`, through that package's own
+  Python loader, `fancy_conformance` (on pytest's `pythonpath` from the envelope
+  checkout; CI sets `PYTHONPATH` to its tag checkout).
+  A missing conformance checkout is a **failure**, never a skip.
+  `tests/conformance/test_pinned_suite_version.py` pins the fixture set, and CI
+  checks out exactly that tag; a test fails if the pin and the workflow's `ref`
+  disagree, so the two move together in one deliberate commit.
+- `tests/parity/test_graph_fixtures.py` runs the 23 golden `WorkflowSchema`
+  fixtures. Read `tests/parity/fixtures/SOURCE.md` before touching them: they
+  are a COPY of the PHP twin's, because those goldens are not in the shared
+  package and nothing on the Node side runs them at all.
+- `tests/parity/test_fixture_provenance.py` fails if that copy has drifted from
+  the twin's, whenever the twin is on disk.
+- `tests/parity/test_durable_driver_parity.py` runs **every fixture through the
+  per-node durable driver too** and requires the same answer. That is what pins
+  "what is unblocked?" against "what is next?".
+
+There is **no private loader here**, and there must not be one again.
+`tests/conformance/loader.py` was a bridge until `fancy-conformance` shipped its
+own Python loader, and it was deleted on 2026-09-13: four consumers had each
+written one and two of those copies read a case's `skip` as a scalar, so a row
+skipped for PHP skipped on Python too while the log read green. A loader bug is
+fixed once, in `fancy-conformance`. Note the shared summary reports the fixture
+version as `suiteVersion`, the key the Node and PHP loaders use.
+
+## Conventions
+
+- **Python 3.11 floor.** Frozen dataclasses, `Protocol` over base classes,
+  `X | None`.
+- **No runtime dependencies in the core.** Injectable protocols with offline
+  defaults, never a hard dep. An adapter takes its dependency behind an extra.
+- **Faithfulness first.** If in doubt, match `run-flow.ts` semantics and add a
+  fixture. Divergence from the TS *code* (never the TS *contract*) gets a
+  docstring at the point of divergence.
+- **Regenerate fixtures deliberately.** They are golden files; only regenerate
+  when behaviour legitimately changes, and eyeball the diff.
+
+## Commands
+
+```bash
+python -m pip install -e . --group dev
+pytest                              # unit + parity + conformance
+pytest tests/unit/test_engine.py    # one file
+ruff check . && ruff format --check .
+mypy
+```
+
+`FANCY_CONFORMANCE_ROOT` and `FANCY_FLOW_PHP_FIXTURES` override the sibling-repo
+discovery when the checkouts are somewhere unusual.
+
+## Status
+
+**Released; see `CHANGELOG.md` for the current line.** This section said
+"0.1.0 — core parity, unreleased" through sixteen minor releases, so read the
+changelog rather than this paragraph for what has shipped.
+
+The engine, the registries, the 29 built-in kinds plus structural `note` /
+`subgraph` and their executors, `{{ }}`, capabilities, the node manifest,
+`GraphPolicy`, terminal lanes, and the durable core (claims / frontier / replay
+/ retries / human gates / coordinator) are built and tested.
+
+**Not built, and staged in the plan:** queue adapters (Celery, Dramatiq, Taskiq,
+Procrastinate), a persistent `NodeClaimStore`, a web-framework integration, the
+`agent` executor, and the Human+ / MCP surface.

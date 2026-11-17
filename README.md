@@ -38,6 +38,13 @@ every mode, with an empty graph and `result.refused` true, exactly as the
 TypeScript and PHP runtimes refuse it. Check `result.refused` before running,
 or an empty graph runs and reports success.
 
+<!-- fancy-agents-note:start -->
+> **For agents.** This package is listed on the Fancy MCP catalog server at
+> `https://ui.particle.academy/mcp` (streamable HTTP, no API key; MCP id `fancy-ui`),
+> with install commands and docs, alongside the rest of the kit. How an agent
+> installs and uses this package is in [AGENTS.md](https://github.com/Particle-Academy/fancy-flow-py/blob/main/AGENTS.md).
+<!-- fancy-agents-note:end -->
+
 ## Async, without two engines
 
 Executors may be synchronous or `async`. The graph walk is written once and
@@ -153,6 +160,6 @@ pytest
 
 Pre-1.0: breaking changes land in minor releases. See
 [`CHANGELOG.md`](CHANGELOG.md) and, for how the package is built and what is
-staged next, `AGENTS.md`.
+staged next, [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 MIT.
