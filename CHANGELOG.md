@@ -21,6 +21,7 @@ version number is not a promise it can yet keep; the entries are.
 - Rebranded the display name to Fancy Dev Kit (README and package description). Package names, the npm scope, URLs and the `fancy-ui` MCP id are unchanged.
 - **Docs:** `AGENTS.md` is now the guide to using this package (install, its entries on the Fancy MCP catalog server, API essentials, traps). The contributor notes it held moved to `CONTRIBUTING.md`, and `CLAUDE.md` is now a symlink to it. The README points to the MCP server and to `AGENTS.md`. No code changed; nothing to do.
 - CI: re-pin org third-party allowlist to 2614224
+- Conformance fixtures 0.62.0: the `flow/*`, `shared/expr`, `shared/satisfies-range` and `shared/flow-run-identity` rows are now pinned at fancy-conformance 0.62.0 (was 0.32.0), in the CI checkout ref and `PINNED_SUITE_VERSION`. Test-only; no runtime change, nothing to do.
 
 ## [0.30.1] - 2026-11-01
 
