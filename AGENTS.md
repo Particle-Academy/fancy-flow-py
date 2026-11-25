@@ -38,7 +38,9 @@ run = FlowRunner().run(
     builtin.executors(),
     options=RunOptions(initial_inputs={"trigger-1": {"payload": body}}),
 )
-run.ok; run.outputs; run.error
+run.ok
+run.outputs
+run.error
 ```
 
 - **Async:** `await FlowRunner().arun(graph, executors)` awaits awaitable
