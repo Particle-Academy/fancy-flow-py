@@ -8,6 +8,8 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-11-25
+
 ### Changed
 
 - **CI: the lab-certificate gate verifies against the lab's rotated key list.**
