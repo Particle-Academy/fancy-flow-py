@@ -8,7 +8,7 @@ serializes differently per language is not a union.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Final
 
 __all__ = ["NodeStatus", "RunEvent"]
@@ -55,6 +55,22 @@ class RunEvent:
     detail: Any = None
     ok: bool | None = None
     error: str | None = None
+
+    def for_parent(self, prefix: str) -> RunEvent | None:
+        """This event as a PARENT run sees it, or None if the parent must not.
+
+        Twin of fancy-flow-php's ``RunEvent::forParent`` (#25). A nested run
+        (``for_each`` over its item lane) emits events about nodes the host has
+        never heard of, under ids that collide with the parent's, so a
+        node-scoped event is re-addressed under ``prefix``. Run-scoped events
+        return None: a lane's ``run-start`` is not the workflow starting, once
+        per item. A node-scoped event with no node id passes through as is.
+        """
+        if self.type in (self.RUN_START, self.RUN_END, self.RUN_ERROR):
+            return None
+        if self.node_id is None:
+            return replace(self)
+        return replace(self, node_id=prefix + self.node_id)
 
     @classmethod
     def run_start(cls) -> RunEvent:

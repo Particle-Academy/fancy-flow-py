@@ -23,6 +23,19 @@ version number is not a promise it can yet keep; the entries are.
 - CI: re-pin org third-party allowlist to 2614224
 - Conformance fixtures 0.62.0: the `flow/*`, `shared/expr`, `shared/satisfies-range` and `shared/flow-run-identity` rows are now pinned at fancy-conformance 0.62.0 (was 0.32.0), in the CI checkout ref and `PINNED_SUITE_VERSION`. Test-only; no runtime change, nothing to do.
 
+### Fixed
+
+- **`for_each` now forwards every event its item lane emits** (parity with
+  fancy-flow-php #25). Each iteration ran its lane with no event sink, so a
+  status, message or log from a node inside the loop never reached the host:
+  the PHP twin reported five per-item events for five items and this port
+  reported none. Node-scoped events now arrive re-addressed as
+  `<for_each id>/<index>/<node id>` (the id escaped as in run identities) by the
+  new `RunEvent.for_parent`, the twin of PHP's `RunEvent::forParent`. A lane's
+  own `run-start` / `run-end` / `run-error` are not forwarded. Nothing to do,
+  unless your sink assumed every `node_id` is a top-level node: ids with a `/`
+  now come from inside a loop.
+
 ## [0.30.1] - 2026-11-01
 
 ### Fixed

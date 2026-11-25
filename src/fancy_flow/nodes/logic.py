@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from ..registry.blank import trimmed_key
 from ..runtime.context import ExecutionContext
 from ..runtime.events import RunEvent
+from ..runtime.identity import escape_segment
 from ..runtime.ports import Port
 from .support import expr
 from .support.routing_diagnostics import warn_if_unresolved
@@ -220,10 +221,20 @@ def for_each(ctx: ExecutionContext) -> Any:
         for edge in entries:
             initial_inputs.setdefault(edge.target, {})[edge.target_handle or "in"] = item
 
+        # EVERY node-scoped event the lane emits, re-addressed for the parent,
+        # as fancy-flow-php's ForEachExecutor does (#25). This passed no sink,
+        # so a status, message or log from inside the loop never reached the host.
+        prefix = f"{escape_segment(ctx.node.id)}/{index}/"
+
+        def forward(event: RunEvent, prefix: str = prefix) -> None:
+            forwarded = event.for_parent(prefix)
+            if forwarded is not None:
+                ctx.emit(forwarded)
+
         nested = FlowRunner().run(
             lane_graph,
             lane_executors,
-            None,
+            forward,
             RunOptions(
                 initial_inputs=initial_inputs,
                 depth=ctx.depth + 1,
