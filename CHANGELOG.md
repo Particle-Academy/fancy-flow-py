@@ -8,6 +8,22 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`llm_call` and `agent` no longer default `temperature` to 0.7.** The field
+  had `default: 0.7`, so `default_config_for()`, an authoring tool and
+  `import_workflow()` (for a node saved without a config) wrote it into nodes
+  nobody had configured, and `llm_call` forwarded it to the client. Current
+  Anthropic models reject a request that sets `temperature`, so such a node
+  failed on its first call. No sampling parameter (`temperature`, `top_p`,
+  `top_k`) now has a default: none is sent unless the author sets one. An
+  explicit value still passes through unchanged; whether a provider accepts it
+  is the adapter's call. The field is still declared, so authors can set it.
+  **What to do:** nothing, unless you relied on the implicit 0.7; then set
+  `temperature: 0.7` on the node. Saved graphs are not rewritten: a stored 0.7
+  from the old default cannot be told apart from a deliberate one, so it stays
+  and is still sent. Remove it from nodes that run on a model that rejects it.
+
 ## [0.30.2] - 2026-11-25
 
 ### Changed

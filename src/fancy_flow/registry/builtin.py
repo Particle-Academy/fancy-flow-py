@@ -212,7 +212,8 @@ def agent_kind() -> dict[str, Any]:
                     "min": 0,
                     "max": 2,
                     "step": 0.1,
-                    "default": 0.7,
+                    # No default: a sampling parameter is sent only when the author
+                    # sets one. Current Anthropic models reject `temperature`.
                 },
             ],
         }
@@ -1067,7 +1068,8 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
                     "min": 0,
                     "max": 2,
                     "step": 0.1,
-                    "default": 0.7,
+                    # No default: a sampling parameter is sent only when the author
+                    # sets one. Current Anthropic models reject `temperature`.
                 },
                 {
                     "type": "number",
