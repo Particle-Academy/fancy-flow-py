@@ -23,6 +23,11 @@ version number is not a promise it can yet keep; the entries are.
   `temperature: 0.7` on the node. Saved graphs are not rewritten: a stored 0.7
   from the old default cannot be told apart from a deliberate one, so it stays
   and is still sent. Remove it from nodes that run on a model that rejects it.
+- **The `model` placeholder on `llm_call`, `llm_router` and `agent` now
+  suggests `claude-sonnet-5-5`.** It suggested `claude-sonnet-4-5`, which
+  retires on 2026-11-30. A placeholder is only a hint and is never written into
+  a node. **What to do:** nothing, unless a saved node names
+  `claude-sonnet-4-5`; move it to a current model before that date.
 
 ## [0.30.2] - 2026-11-25
 

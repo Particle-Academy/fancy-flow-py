@@ -181,7 +181,7 @@ def agent_kind() -> dict[str, Any]:
                     "key": "model",
                     "label": "Model",
                     "required": True,
-                    "placeholder": "claude-sonnet-4-5",
+                    "placeholder": "claude-sonnet-5-5",
                 },
                 {"type": "textarea", "key": "system", "label": "System prompt", "rows": 4},
                 {
@@ -1050,7 +1050,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
                     "type": "text",
                     "key": "model",
                     "label": "Model",
-                    "placeholder": "claude-sonnet-4-5",
+                    "placeholder": "claude-sonnet-5-5",
                     "required": True,
                 },
                 {"type": "textarea", "key": "system", "label": "System prompt", "rows": 4},
@@ -1172,7 +1172,7 @@ def _KIND_LITERALS() -> list[dict[str, Any]]:  # noqa: N802 - reads as a constan
                     "type": "text",
                     "key": "model",
                     "label": "Model",
-                    "placeholder": "claude-sonnet-4-5",
+                    "placeholder": "claude-sonnet-5-5",
                 },
                 {
                     "type": "switch",
