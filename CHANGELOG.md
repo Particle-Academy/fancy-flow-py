@@ -8,6 +8,8 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+## [0.30.3] - 2026-11-26
+
 ### Fixed
 
 - **`llm_call` and `agent` no longer default `temperature` to 0.7.** The field
