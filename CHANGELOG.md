@@ -8,6 +8,17 @@ version number is not a promise it can yet keep; the entries are.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`for_each` now says what a `results` entry looks like.** Each entry is
+  that iteration's node outputs keyed by node id, so a lane node's field is
+  `results.0.<node-id>.<field>`, and a failed item's entry is None (its error
+  is in `failures`). The descriptions said only "each item's lane outputs".
+  An authoring agent reads them, and a lab builder wrote
+  `{{ in.results.0.total }}` where the value was at
+  `results.0.score-1.total`. Text only: the shape is unchanged.
+  **What to do:** nothing.
+
 ## [0.30.3] - 2026-11-26
 
 ### Fixed
